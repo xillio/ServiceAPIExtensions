@@ -437,7 +437,7 @@ namespace ServiceAPIExtensions.Controllers
             return Ok(ConstructExpandoObject(content));
         }
 
-        [/*AuthorizePermission("EPiServerServiceApi", "ReadAccess"),*/ HttpGet, Route("type/{Type}")]
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
         public virtual IHttpActionResult GetContentType(string Type)
         {
             var episerverType = _typerepo.Load(Type);
