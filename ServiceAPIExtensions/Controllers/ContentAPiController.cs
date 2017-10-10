@@ -445,7 +445,7 @@ namespace ServiceAPIExtensions.Controllers
             //return Created<object>(new Uri(Url.Link("GetContentRoute",new {Reference=rt.ToReferenceWithoutVersion().ToString()})), new {reference=rt.ToReferenceWithoutVersion().ToString()});
         }
 
-        [/*AuthorizePermission("EPiServerServiceApi", "ReadAccess"),*/ HttpGet, Route("path/{*Path}")]
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("path/{*Path}")]
         public virtual IHttpActionResult GetContentByPath(string Path)
         {
             // Extract the method from the path
