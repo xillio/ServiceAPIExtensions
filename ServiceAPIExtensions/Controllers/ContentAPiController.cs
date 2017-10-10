@@ -24,6 +24,7 @@ using EPiServer.Web.Internal;
 using System.Reflection;
 using Newtonsoft.Json;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -96,12 +97,12 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
         
-        public static ExpandoObject ConstructExpandoObject(IContent c, string Select=null)
+        public static ExpandoObject ConstructExpandoObject(IContent c, string Select=null, Encryption encryption=Encryption.SHA256)
         {
-            return ConstructExpandoObject(c,true, Select);
+            return ConstructExpandoObject(c,true, Select, encryption);
         }
 
-        public static ExpandoObject ConstructExpandoObject(IContent c, bool IncludeBinary,string Select=null)
+        public static ExpandoObject ConstructExpandoObject(IContent c, bool IncludeBinary,string Select=null, Encryption encryption = Encryption.SHA256)
         {
             dynamic e = new ExpandoObject();
             var dic=e as IDictionary<string,object>;
@@ -116,20 +117,31 @@ namespace ServiceAPIExtensions.Controllers
             //TODO: Resolve Content Type
             var parts = (Select == null) ? null : Select.Split(',');
 
-            if (c is MediaData)
+            if (c is IBinaryStorable)
             {
-                dynamic Media = new ExpandoObject();
-                var md = c as MediaData;
-                Media.MimeType = md.MimeType;
-                Media.RouteSegment = md.RouteSegment;
-                if (IncludeBinary && md.BinaryData != null)
+                if ((c as IBinaryStorable).BinaryData != null)
                 {
-                    using (var br = new BinaryReader(md.BinaryData.OpenRead()))
+                    Stream stream = (c as IBinaryStorable).BinaryData.OpenRead();
+                    StringBuilder sBuilder = new StringBuilder();
+
+                    HashAlgorithm hashing;
+                    if (encryption == Encryption.MD5) hashing = MD5.Create();
+                    else if (encryption == Encryption.SHA1) hashing = SHA1CryptoServiceProvider.Create();
+                    else hashing = SHA256CryptoServiceProvider.Create();
+
+                    byte[] hash = hashing.ComputeHash(stream);
+                    for (int i = 0; i < hash.Length; i++)
                     {
-                        Media.Binary = Convert.ToBase64String(br.ReadBytes((int)br.BaseStream.Length));
+                        sBuilder.Append(hash[i].ToString("x2"));
                     }
+
+                    dic.Add(encryption.ToString(), sBuilder.ToString());
+                    dic.Add("FileSize", stream.Length);
+                    stream.Close();
+                } else
+                {
+                    dic.Add("FileSize", 0);
                 }
-                dic.Add("Media", Media);
             }
             
             foreach (var pi in c.Property)
@@ -220,17 +232,62 @@ namespace ServiceAPIExtensions.Controllers
             {
                 // Get the binary contents.
                 var cnt = _repo.Get<IContent>(r);
-                var binary = cnt as IBinaryStorable;
-                if (binary.BinaryData == null) return NotFound();
 
-                // Return the binary contents as a stream.
-                using (var br = new BinaryReader(binary.BinaryData.OpenRead()))
+                if (cnt is IBinaryStorable)
                 {
-                    var response = new HttpResponseMessage(HttpStatusCode.OK);
-                    response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
-                    if (cnt as IContentMedia != null)
-                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
-                    return ResponseMessage(response);
+                    var binary = cnt as IBinaryStorable;
+                    if (binary.BinaryData == null) return NotFound();
+
+                    // Return the binary contents as a stream.
+                    using (var br = new BinaryReader(binary.BinaryData.OpenRead()))
+                    {
+                        var response = new HttpResponseMessage(HttpStatusCode.OK);
+                        response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
+                        if (cnt as IContentMedia != null)
+                            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
+                        return ResponseMessage(response);
+                    }
+                } else if (cnt is PageData)
+                {
+                    var page = cnt as PageData;
+                    
+                    string url = string.Format("{0}://{1}:{2}{3}",
+                         HttpContext.Current.Request.Url.Scheme,
+                         HttpContext.Current.Request.Url.Host,
+                         HttpContext.Current.Request.Url.Port,
+                         page.Property["PageLinkUrl"].ToString()
+                         );
+
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+                    HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+                    string data = "";
+
+                    if (response.StatusCode == HttpStatusCode.OK)
+                    {
+                        Stream receiveStream = response.GetResponseStream();
+                        StreamReader readStream = null;
+
+                        if (response.CharacterSet == null)
+                        {
+                            readStream = new StreamReader(receiveStream);
+                        }
+                        else
+                        {
+                            readStream = new StreamReader(receiveStream, Encoding.GetEncoding(response.CharacterSet));
+                        }
+
+                        data = readStream.ReadToEnd();
+                        data = data.Replace("\r", "");
+                        data = data.Replace("\n", "");
+
+                        response.Close();
+                        readStream.Close();
+                    }
+
+                    return Ok(data);
+                } else
+                {
+                    return NotFound();
                 }
             }
             catch (ContentNotFoundException e)
@@ -388,48 +445,50 @@ namespace ServiceAPIExtensions.Controllers
             //return Created<object>(new Uri(Url.Link("GetContentRoute",new {Reference=rt.ToReferenceWithoutVersion().ToString()})), new {reference=rt.ToReferenceWithoutVersion().ToString()});
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("path/{*Path}")]
+        [/*AuthorizePermission("EPiServerServiceApi", "ReadAccess"),*/ HttpGet, Route("path/{*Path}")]
         public virtual IHttpActionResult GetContentByPath(string Path)
         {
             // Extract the method from the path
-            string method = Path.ToLower().Substring(Path.LastIndexOf("/")+1);
-            if (method == "binarydata" || method == "children")
-                Path = Path.Substring(0, Path.LastIndexOf("/"));
+            string method = "";
+            if (Path.IndexOf("/") >= 0)
+                method = Path.Substring(0, Path.IndexOf("/"));
 
+            if (method == "children")
+                Path = Path.Substring(Path.IndexOf("/")+1);
+            
             // Find the reference to the object with a path.
             FindContentReference(Path, out ContentReference r);
             if (r == ContentReference.EmptyReference) return NotFound();
 
-            if (method == "binarydata")
+            if (Request.Headers.Accept.ToString().ToLower() == "binary")
             {
-                // Get the binary data from the reference.
-                var cnt = _repo.Get<IContent>(r);
-
-                if ((cnt is IBinaryStorable) && (cnt as IBinaryStorable).BinaryData != null)
-                {
-                    var binary = cnt as IBinaryStorable;
-                    if (binary.BinaryData == null) return NotFound();
-                    using (var br = new BinaryReader(binary.BinaryData.OpenRead()))
-                    {
-                        var response = new HttpResponseMessage(HttpStatusCode.OK);
-                        response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
-                        if (cnt as IContentMedia != null)
-                            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
-                        return ResponseMessage(response);
-                    }
-                }
-                else return BadRequest("Resource does not have binary data");
+                return GetBinaryContent(Path);
             } else if (method == "children")
             {
                 // Get all the children from the reference. 
-                var children = _repo.GetChildren<IContent>(r).ToList();
-                if (children.Count > 0)
+                if (!_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
+                List<ExpandoObject> children = new List<ExpandoObject>();
+
+                // Collect sub pages
+                var descendants = _repo.GetDescendents(r);
+                if (descendants.Count() == 0) return Ok(new ExpandoObject[0]);
+
+                var result = descendants.Where(x => (_repo.Get<IContent>(x).ParentLink.ID == r.ID));
+                children.AddRange(result.Select(c => ConstructExpandoObject(_repo.Get<IContent>(c), true)));
+
+                // Collect Main Content
+                if (parent is PageData)
                 {
-                    dynamic e = new ExpandoObject();
-                    e.Children = children.Select(c => ConstructExpandoObject(c, false)).ToArray();
-                    return Ok((ExpandoObject)e);
+                    var main = (parent.Property.Get("MainContentArea")?.Value as ContentArea);
+                    if (main != null)
+                        children.AddRange(main.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
+
+                    var related = (parent.Property.Get("RelatedContentArea")?.Value as ContentArea);
+                    if (related != null)
+                        children.AddRange(related.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
                 }
-                else return Ok(new ExpandoObject());
+
+                return Ok(children.ToArray());
             } 
 
             // Return the information of the reference itself.
@@ -636,6 +695,10 @@ namespace ServiceAPIExtensions.Controllers
                 previousPart = k;
             }
         }
-
+        
+        public enum Encryption
+        {
+            MD5, SHA1, SHA256
+        };
     }
 }
