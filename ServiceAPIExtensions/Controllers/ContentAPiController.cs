@@ -103,6 +103,7 @@ namespace ServiceAPIExtensions.Controllers
         }
 
         public static ExpandoObject ConstructExpandoObject(IContent c, bool IncludeBinary,string Select=null, Encryption encryption = Encryption.SHA256)
+            //Freek: we don't seem to use encryption from an external endpoint anywhere. Is it necessary? Is it tested?
         {
             dynamic e = new ExpandoObject();
             var dic=e as IDictionary<string,object>;
@@ -118,17 +119,28 @@ namespace ServiceAPIExtensions.Controllers
             var parts = (Select == null) ? null : Select.Split(',');
 
             if (c is IBinaryStorable)
+                // Can we refactor this as 
+                //
+                // var binaryStorable = c as BinaryStorable;
+                //if(binaryStorageble!=null) { ... }
+                //
+                //this prevents us from having 2 casts below
             {
                 if ((c as IBinaryStorable).BinaryData != null)
                 {
                     Stream stream = (c as IBinaryStorable).BinaryData.OpenRead();
+                    //Could this be wrapped in a 'using' block? using((c as IBinaryStorable).BinaryData.OpenRead()) {...}
+                    //that way the stream will be closed even if something fails
+                    //See also implementation of GetBinaryContent()
                     StringBuilder sBuilder = new StringBuilder();
 
+                    //Extracting the following to a method or using a switch migth make it a bit more readable.
                     HashAlgorithm hashing;
                     if (encryption == Encryption.MD5) hashing = MD5.Create();
                     else if (encryption == Encryption.SHA1) hashing = SHA1CryptoServiceProvider.Create();
                     else hashing = SHA256CryptoServiceProvider.Create();
 
+                    //Extracting the following to its own method might make it a bit more readble
                     byte[] hash = hashing.ComputeHash(stream);
                     for (int i = 0; i < hash.Length; i++)
                     {
@@ -247,10 +259,14 @@ namespace ServiceAPIExtensions.Controllers
                             response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
                         return ResponseMessage(response);
                     }
-                } else if (cnt is PageData)
+                } else if (cnt is PageData) // We don't need the 'else' here since the above if always returns
                 {
                     var page = cnt as PageData;
-                    
+
+                    //Couple of points for this if block:
+                    // * Why do we de a request to ourselves here? Can't we just invoke an appropriate method? Or use a redirect?
+                    // * In practice it often happens that a webserver can't access itself through the 'endpoint' due to firewall configs, NATs, etc.
+                    // * Don't we need to forward credentials here?
                     string url = string.Format("{0}://{1}:{2}{3}",
                          HttpContext.Current.Request.Url.Scheme,
                          HttpContext.Current.Request.Url.Host,
@@ -260,6 +276,7 @@ namespace ServiceAPIExtensions.Controllers
 
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
                     HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+
                     string data = "";
 
                     if (response.StatusCode == HttpStatusCode.OK)
@@ -277,15 +294,18 @@ namespace ServiceAPIExtensions.Controllers
                         }
 
                         data = readStream.ReadToEnd();
+                        //why do we remove line endings here?
                         data = data.Replace("\r", "");
                         data = data.Replace("\n", "");
 
+                        //Can we use a using block to prevent the following statements. Also, StreamReader alreadty closes the underlying stream.
                         response.Close();
                         readStream.Close();
                     }
+                    //why do we return OK even if the result was not OK?
 
                     return Ok(data);
-                } else
+                } else // don't need the 'else'
                 {
                     return NotFound();
                 }
@@ -296,6 +316,7 @@ namespace ServiceAPIExtensions.Controllers
             }
             catch (NullReferenceException ex)
             {
+                //when does this happen? This is probably a server error?
                 return NotFound();
             }
         }
@@ -455,15 +476,33 @@ namespace ServiceAPIExtensions.Controllers
 
             if (method == "children")
                 Path = Path.Substring(Path.IndexOf("/")+1);
+
+            // We still don't disambiguate for main and related here
+            // I think this method should look something like this, or even better: using route matching
+            //switch(method) {
+            //    case "children":
+            //        return GetChildren(Path);
+            //    case "main":
+            //        return GetMain(Path);
+            //    case "related":
+            //        return GetRelated(Path);
+            //    case "entity":
+            //        return GetEntity(Path);
+            //    case "binary":
+            //        return GetBinary(Path);
+            //    default:
+            //        throw new Exception("Unknown type");
+
             
             // Find the reference to the object with a path.
             FindContentReference(Path, out ContentReference r);
             if (r == ContentReference.EmptyReference) return NotFound();
 
+            // Is binary a valid mimetype? application/octet-stream is more customary (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types#applicationoctet-stream)
             if (Request.Headers.Accept.ToString().ToLower() == "binary")
             {
                 return GetBinaryContent(Path);
-            } else if (method == "children")
+            } else if (method == "children") //We don't need the 'else' since above always returns
             {
                 // Get all the children from the reference. 
                 if (!_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
@@ -471,6 +510,7 @@ namespace ServiceAPIExtensions.Controllers
 
                 // Collect sub pages
                 var descendants = _repo.GetDescendents(r);
+                //Why not use _repo.GetChildren() (as it was?)
                 if (descendants.Count() == 0) return Ok(new ExpandoObject[0]);
 
                 var result = descendants.Where(x => (_repo.Get<IContent>(x).ParentLink.ID == r.ID));
@@ -640,6 +680,7 @@ namespace ServiceAPIExtensions.Controllers
         /// <param name="r">The reference to the last item</param>
         private void FindContentReference(string Path, out ContentReference r)
         {
+            //All  the main/related stuff should be removed
             var parts = Path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
             r = LookupRef(parts.First());
             string previousPart = "";
@@ -696,6 +737,7 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
         
+        //These are hashing algorithms, not encryption, so change the name?
         public enum Encryption
         {
             MD5, SHA1, SHA256
