@@ -118,6 +118,7 @@
       <HintPath>..\..\..\source\repos\EpiserverSite1\packages\structuremap.web-signed.3.1.6.191\lib\net40\StructureMap.Web.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Core" />
     <Reference Include="System.IdentityModel.Tokens.Jwt, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <HintPath>..\..\..\source\repos\EpiserverSite1\packages\System.IdentityModel.Tokens.Jwt.3.0.0\lib\net45\System.IdentityModel.Tokens.Jwt.dll</HintPath>
