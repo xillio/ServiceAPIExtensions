@@ -284,7 +284,7 @@ namespace ServiceAPIExtensions.Controllers
             if (r == ContentReference.RootPage && string.IsNullOrEmpty(Path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
 
             // If its already in the wastebasket delete it, otherwise put it in the wastebasket.
-            else _repo.MoveToWastebasket(r);
+            _repo.MoveToWastebasket(r);
             return Ok();
         }
 
