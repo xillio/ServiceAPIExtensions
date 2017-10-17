@@ -119,10 +119,27 @@ namespace ServiceAPIExtensions.Controllers
             //TODO: Resolve Content Type
             var parts = (Select == null) ? null : Select.Split(',');
 
-            if (c is IBinaryStorable)
+            var content = c as IBinaryStorable;
+
+            if (content!=null)
             {
                 // IF the content has binarydata, get the Hash and size.
-                CalculateHash(c as IBinaryStorable, ref dic);
+
+                if (content.BinaryData != null)
+                {
+                    using (Stream stream = content.BinaryData.OpenRead())
+                    {
+                        dic.Add("MD5", Hash(stream, MD5.Create()));
+                        dic.Add("SHA1", Hash(stream, SHA1.Create()));
+                        dic.Add("SHA256", Hash(stream, SHA256.Create()));
+                        dic.Add("FileSize", stream.Length);
+                    }
+                }
+                else
+                {
+                    dic.Add("FileSize", 0);
+                }
+
                 if (c is MediaData)
                     dic.Add("MimeType", (c as MediaData).MimeType);
             }
@@ -172,7 +189,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*Path}")]
         public virtual IHttpActionResult UpdateContent(string Path, [FromBody] ExpandoObject Updated, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
             if (r == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
 
@@ -197,7 +215,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*Path}")]
         public virtual IHttpActionResult CreateContent(string Path, [FromBody] ExpandoObject content, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
 
             // Instantiate content of named type.
@@ -248,24 +267,19 @@ namespace ServiceAPIExtensions.Controllers
             if (!string.IsNullOrEmpty(_name)) con.Name = _name;
             try
             {
-
                 var rt = _repo.Save(con, saveaction);
                 return Created<object>(Path, new { reference = rt.ID });
             } catch (ValidationException ex)
             {
                 return BadRequest(ex.Message);
-            } catch (ArgumentNullException ex)
-            {
-                _repo.Delete(con.ContentLink, true);
-                return BadRequest("Cannot create an enity at the root");
             }
-            //return Created<object>(new Uri(Url.Link("GetContentRoute",new {Reference=rt.ToReferenceWithoutVersion().ToString()})), new {reference=rt.ToReferenceWithoutVersion().ToString()});
         }
         
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*Path}")]
         public virtual IHttpActionResult DeleteContent(string Path)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
             if (r == ContentReference.RootPage && string.IsNullOrEmpty(Path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
 
@@ -278,7 +292,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*Path}")]
         public virtual IHttpActionResult GetBinaryContent(string Path)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
                 
             var cnt = _repo.Get<IContent>(r);
@@ -295,6 +310,10 @@ namespace ServiceAPIExtensions.Controllers
                     response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
                     if (cnt as IContentMedia != null)
                         response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
+                    else
+                    {
+                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+                    }
                     return ResponseMessage(response);
                 }
             }
@@ -319,7 +338,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*Path}")]
         public virtual IHttpActionResult GetChildren(string Path)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference ||
                 !_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
 
@@ -347,7 +367,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("entity/{*Path}")]
         public virtual IHttpActionResult GetEntity(string Path)
         {
-            FindContentReference(Path, out ContentReference r);
+            Path = Path ?? "";
+            var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
 
             var content = _repo.Get<IContent>(r);
@@ -462,42 +483,23 @@ namespace ServiceAPIExtensions.Controllers
             return name.Replace(' ', '-').ToLower();
         }
 
-        private void FindContentReference(string Path, out ContentReference r)
+        private ContentReference FindContentReference(string Path)
         {
             if (String.IsNullOrEmpty(Path))
             {
-                r = ContentReference.RootPage;
-                return;
+                return ContentReference.RootPage;
             }
 
             var parts = Path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            r = LookupRef(parts.First());
+            var r = LookupRef(parts.First());
             foreach (var k in parts.Skip(1))
             {
-                var oldRef = r;
                 r = LookupRef(r, k);
             }
-        }
 
-        private static void CalculateHash(IBinaryStorable content, ref IDictionary<string, object> dic)
-        {
-            if (content.BinaryData != null)
-            {
-                using (Stream stream = content.BinaryData.OpenRead())
-                {
-                    StringBuilder sBuilder = new StringBuilder();
-
-                    dic.Add("MD5", Hash(stream, MD5CryptoServiceProvider.Create()));
-                    dic.Add("SHA1", Hash(stream, SHA1CryptoServiceProvider.Create()));
-                    dic.Add("SHA256", Hash(stream, SHA256CryptoServiceProvider.Create()));
-                    dic.Add("FileSize", stream.Length);
-                }
-            }
-            else
-            {
-                dic.Add("FileSize", 0);
-            }
+            return r;
         }
+        
 
         private static string Hash(Stream stream, HashAlgorithm hashing)
         {
