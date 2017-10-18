@@ -116,6 +116,7 @@ namespace ServiceAPIExtensions.Controllers
             e.ContentGuid = c.ContentGuid;
             e.ContentLink = c.ContentLink;
             e.ContentTypeID = c.ContentTypeID;
+            e.__EpiserverContentType = GetContentType(c);
             //TODO: Resolve Content Type
             var parts = (Select == null) ? null : Select.Split(',');
 
@@ -184,6 +185,31 @@ namespace ServiceAPIExtensions.Controllers
                     
             }
             return e;
+        }
+
+        private static string GetContentType(IContent c)
+        {
+            if(c is MediaData)
+            {
+                return "File";
+            }
+
+            if(c is ContentFolder)
+            {
+                return "Folder";
+            }
+
+            if(c is PageData)
+            {
+                return "Page";
+            }
+
+            if (c is BlockData)
+            {
+                return "Block";
+            }
+
+            return $"Unknown (ContentTypeID={c.ContentTypeID})";
         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*Path}")]
@@ -370,9 +396,16 @@ namespace ServiceAPIExtensions.Controllers
             var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
 
-            var content = _repo.Get<IContent>(r);
-            if (content.IsDeleted) return NotFound();
-            return Ok(ConstructExpandoObject(content));
+            try
+            {
+                var content = _repo.Get<IContent>(r);
+                if (content.IsDeleted) return NotFound();
+                return Ok(ConstructExpandoObject(content));
+            }
+            catch(ContentNotFoundException)
+            {
+                return NotFound();
+            }
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
