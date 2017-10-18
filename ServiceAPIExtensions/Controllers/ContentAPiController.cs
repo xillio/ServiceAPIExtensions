@@ -65,6 +65,11 @@ namespace ServiceAPIExtensions.Controllers
         /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
         protected ContentReference LookupRef(ContentReference Parent, string Name)
         {
+            if (Parent.Equals(ContentReference.EmptyReference))
+            {
+                return ContentReference.EmptyReference;
+            }
+
             var content = (new UrlSegment(_repo)).GetContentBySegment(Parent, Name);
             if (content != null && !content.Equals(ContentReference.EmptyReference))
             {
@@ -78,25 +83,6 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             return ContentReference.EmptyReference;
-        }
-
-        /// <summary>
-        /// Finds the content with a given name and its type.  Favours URLEncoded name over actual name.
-        /// </summary>
-        /// <param name="Parent">The reference to the parent</param>
-        /// <param name="ContentType">The content type</param>
-        /// <param name="Name">The name of the content</param>
-        /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        protected ContentReference LookupRef(ContentReference Parent, string ContentType, string Name)
-        {
-            var content = (new UrlSegment(_repo)).GetContentBySegment(Parent, Name);
-            if (content != null) return content;
-            else
-            {
-                var temp = _repo.GetChildren<IContent>(Parent).Where(ch => ch.GetType().Name == ContentType && ch.Name == Name).FirstOrDefault();
-                if (temp != null) return temp.ContentLink;
-                else return ContentReference.EmptyReference;
-            }
         }
         
         public static ExpandoObject ConstructExpandoObject(IContent c, string Select=null)
