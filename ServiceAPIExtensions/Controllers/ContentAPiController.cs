@@ -199,20 +199,45 @@ namespace ServiceAPIExtensions.Controllers
         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*Path}")]
-        public virtual IHttpActionResult UpdateContent(string Path, [FromBody] ExpandoObject Updated, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
+        public virtual IHttpActionResult UpdateContent(string Path, [FromBody] Dictionary<string,object> Updated, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
             Path = Path ?? "";
             var r = FindContentReference(Path);
             if (r == ContentReference.EmptyReference) return NotFound();
             if (r == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
 
-            var content = (_repo.Get<IContent>(r) as IReadOnly).CreateWritableClone() as IContent;
+            if(!_repo.TryGet(r, out IContent content))
+            {
+                return NotFound();
+            }
+
+            content = (content as IReadOnly).CreateWritableClone() as IContent;
             var dic = Updated as IDictionary<string, object>;
             EPiServer.DataAccess.SaveAction saveaction = action;
             if (dic.ContainsKey("SaveAction") && ((string)dic["SaveAction"]) == "Publish")
             {
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
                 dic.Remove("SaveAction");
+            }
+
+            if(dic.ContainsKey("__EpiserverMoveEntityTo"))
+            {
+                try
+                {
+                    var moveTo = FindContentReference((string)dic["__EpiserverMoveEntityTo"]);
+                    _repo.Move(r, moveTo);
+                }
+                catch(ContentNotFoundException)
+                {
+                    return BadRequest("target page not found");
+                }
+                dic.Remove("__EpiserverMoveEntityTo");
+            }
+
+            if(dic.ContainsKey("Name"))
+            {
+                content.Name = dic["Name"].ToString();
+                dic.Remove("Name");
             }
             
             // Store the new information in the object.
@@ -392,6 +417,34 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return NotFound();
             }
+        }
+
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{Path}")]
+        public virtual IHttpActionResult GetContentTypeByPath(string Path)
+        {
+            Path = Path ?? "";
+
+            var reference = FindContentReference(Path);
+
+            if(reference.Equals(ContentReference.EmptyReference))
+            {
+                return NotFound();
+            }
+
+            if(!_repo.TryGet(reference, out IContent content))
+            {
+                return NotFound();
+            }
+
+            //var page = _repo.GetDefault<IContent>(ContentReference.RootPage, reference.ID);
+            //we don't use episerverType.PropertyDefinitions since those don't include everything (PageCreated for example)
+
+            return new JsonResult<object>(new
+            {
+                TypeName = content.GetOriginalType().Name,
+                Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
+            },
+                new JsonSerializerSettings(), Encoding.UTF8, this);
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
