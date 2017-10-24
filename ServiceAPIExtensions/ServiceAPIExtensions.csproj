@@ -165,12 +165,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Business\APIInit.cs" />
     <Compile Include="Business\ConversionHelpers.cs" />
     <Compile Include="Business\ImageMediaFormatter.cs" />
     <Compile Include="Business\RestHooks.cs" />
     <Compile Include="Business\ZapierInit.cs" />
-    <Compile Include="Controllers\ContentActionAPIController.cs" />
     <Compile Include="Controllers\ContentAPiController.cs" />
     <Compile Include="Controllers\ContentTypeAPIController.cs" />
     <None Include="Controllers\UserAPIController.cs" />
@@ -180,7 +178,6 @@
   <ItemGroup>
     <None Include="app.config" />
     <None Include="packages.config" />
-    <None Include="ServiceAPIExtensions.nuspec" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
