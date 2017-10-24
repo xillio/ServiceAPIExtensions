@@ -1,20 +1,6 @@
-ServiceAPIExtensions/bin/
-ServiceAPIExtensions/obj/
+/ServiceAPIExtensions/bin/
+/ServiceAPIExtensions/obj/
+/ServiceAPIExtensions/.vs/
+/ServiceAPIExtensions/ServiceAPIExtensions.v12.suo
+/ServiceAPIExtensions/packages/
 
-ServiceAPIExtensionsTest/bin/Debug/
-ServiceAPIExtensionsTest/bin/Release/
-ServiceAPIExtensionsTest/obj/Debug/
-ServiceAPIExtensionsTest/obj/Release/
-
-TestResults
-
-ServiceAPIExtensionsTest/ServiceAPIExtensionsTest/bin/Debug/
-
-ServiceAPIExtensionsTest/ServiceAPIExtensionsTest/bin/Release/
-
-ServiceAPIExtensionsTest/ServiceAPIExtensionsTest/obj/Debug/
-
-ServiceAPIExtensionsTest/ServiceAPIExtensionsTest/obj/Release/
-
-
-ServiceAPIExtensionsTest/packages
