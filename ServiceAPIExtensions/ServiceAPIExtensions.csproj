@@ -167,7 +167,6 @@
   <ItemGroup>
     <Compile Include="Controllers\ContentAPiController.cs" />
     <Compile Include="Controllers\ContentTypeAPIController.cs" />
-    <None Include="Controllers\UserAPIController.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
