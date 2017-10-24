@@ -166,12 +166,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Business\ConversionHelpers.cs" />
-    <Compile Include="Business\RestHooks.cs" />
-    <Compile Include="Business\ZapierInit.cs" />
     <Compile Include="Controllers\ContentAPiController.cs" />
     <Compile Include="Controllers\ContentTypeAPIController.cs" />
     <None Include="Controllers\UserAPIController.cs" />
-    <Compile Include="Controllers\ZapierAPIController.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
