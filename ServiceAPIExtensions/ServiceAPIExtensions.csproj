@@ -166,7 +166,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Business\ConversionHelpers.cs" />
-    <Compile Include="Business\ImageMediaFormatter.cs" />
     <Compile Include="Business\RestHooks.cs" />
     <Compile Include="Business\ZapierInit.cs" />
     <Compile Include="Controllers\ContentAPiController.cs" />
