@@ -195,7 +195,8 @@ namespace ServiceAPIExtensions.Controllers
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*path}")]
         public virtual IHttpActionResult UpdateContent(string path, [FromBody] Dictionary<string,object> newProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            var contentRef = FindContentReference(path??"");
+            path = path ?? "";
+            var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
             if (contentRef == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
 
@@ -242,55 +243,63 @@ namespace ServiceAPIExtensions.Controllers
             return Ok(new { reference = updatedReference.ToString() });
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*Path}")]
-        public virtual IHttpActionResult CreateContent(string Path, [FromBody] ExpandoObject content, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
+        public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
+            path = path ?? "";
+            var r = FindContentReference(path);
             if (r == ContentReference.EmptyReference) return NotFound();
 
             // Instantiate content of named type.
-            var properties = content as IDictionary<string, object>;
-            if (properties == null || !properties.TryGetValue("ContentType", out object ContentType))
+            if (contentProperties == null)
+            {
+                return BadRequest("No properties specified");
+            }
+
+            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString) || !(contentTypeString is string))
+            {
                 return BadRequest("'ContentType' is a required field.");
+            }
 
             // Check ContentType.
-            var ctype = _typerepo.Load((string)ContentType);
-            if (ctype == null && int.TryParse((string)ContentType, out int j)) ctype = _typerepo.Load(j);
-            if (ctype == null) return BadRequest($"'{ContentType}' is an invalid ContentType");
+            ContentType contentType = FindEpiserverContentType(contentTypeString);
+            if (contentType == null)
+            {
+                return BadRequest($"'{contentTypeString}' is an invalid ContentType");
+            }
 
             // Remove 'ContentType' from properties before iterating properties.
-            properties.Remove("ContentType");
+            contentProperties.Remove("ContentType");
 
             // Check if the object already exists.
-            if (properties.TryGetValue("Name", out object name))
+            if (contentProperties.TryGetValue("Name", out object name))
             {
                 var temp = _repo.GetChildren<IContent>(r).Where(ch => ch.Name == (string)name).FirstOrDefault();
                 if (temp != null) return BadRequest($"Content with name '{name}' already exists");
             }
-            
+
             // Create content.
-            IContent con = _repo.GetDefault<IContent>(r, ctype.ID);
+            IContent con = _repo.GetDefault<IContent>(r, contentType.ID);
 
             EPiServer.DataAccess.SaveAction saveaction = action;
-            if (properties.ContainsKey("SaveAction") && (string)properties["SaveAction"] == "Publish")
+            if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
             {
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
-                properties.Remove("SaveAction");
+                contentProperties.Remove("SaveAction");
             }
 
             // Set the reference name.
             string _name = "";
-            if (properties.ContainsKey("Name"))
+            if (contentProperties.ContainsKey("Name"))
             {
-                _name = properties["Name"].ToString();
-                properties.Remove("Name");
+                _name = contentProperties["Name"].ToString();
+                contentProperties.Remove("Name");
             }
-            
+
             if (!string.IsNullOrEmpty(_name)) con.Name = _name;
 
             // Set all the other values.
-            var error = UpdateContentWithProperties(properties, con);
+            var error = UpdateContentWithProperties(contentProperties, con);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference with the requested save action.
@@ -298,13 +307,30 @@ namespace ServiceAPIExtensions.Controllers
             try
             {
                 var rt = _repo.Save(con, saveaction);
-                return Created<object>(Path, new { reference = rt.ID });
-            } catch (ValidationException ex)
+                return Created<object>(path, new { reference = rt.ID });
+            }
+            catch (ValidationException ex)
             {
                 return BadRequest(ex.Message);
             }
         }
-        
+
+        private ContentType FindEpiserverContentType(object contentTypeString)
+        {
+            var contentType = _typerepo.Load((string)contentTypeString);
+
+            if(contentType!=null)
+            {
+                return contentType;
+            }
+
+            if(int.TryParse((string)contentTypeString, out int contentTypeId)) {
+                return _typerepo.Load(contentTypeId);
+            }
+            
+            return null;
+        }
+
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*Path}")]
         public virtual IHttpActionResult DeleteContent(string Path)
         {
