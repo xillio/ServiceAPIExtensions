@@ -340,7 +340,9 @@ namespace ServiceAPIExtensions.Controllers
             var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
                 
-            var content = _repo.Get<IContent>(contentRef);
+            if(!_repo.TryGet(contentRef, out IContent content)) {
+                return NotFound();
+            }
 
             if (content is IBinaryStorable)
             {
