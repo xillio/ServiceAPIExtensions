@@ -72,7 +72,7 @@ namespace ServiceAPIExtensions.Controllers
                 return null;
             }
             var result = new Dictionary<string, object>();
-            
+
             result["Name"] = content.Name;
             result["ParentLink"] = content.ParentLink;
             result["ContentGuid"] = content.ContentGuid;
@@ -82,7 +82,7 @@ namespace ServiceAPIExtensions.Controllers
 
             var binaryContent = content as IBinaryStorable;
 
-            if (binaryContent!=null)
+            if (binaryContent != null)
             {
                 // IF the content has binarydata, get the Hash and size.
 
@@ -107,12 +107,26 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            foreach (var pi in content.Property.Where(p => p.Value != null))
+            foreach(var property in MapProperties(content.Property))
             {
-                if (pi.Type == PropertyDataType.Block && pi.Value is IContent)
+                result.Add(property.Key, property.Value);
+            }
+            
+            return result;
+        }
+
+        private static Dictionary<string, object> MapProperties(PropertyDataCollection properties)
+        {
+            var result = new Dictionary<string, object>();
+            foreach (var pi in properties.Where(p => p.Value != null))
+            {
+                if (pi.Type == PropertyDataType.Block)
                 {
-                    //TODO: Doesn't work. Check SiteLogoType on start page
-                    result.Add(pi.Name, MapContent((IContent)pi.Value));
+                    var contentData = pi.Value as IContentData;
+                    if (contentData!=null)
+                    {
+                        result.Add(pi.Name, MapProperties(contentData.Property));
+                    }
                 }
                 else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
                 {
@@ -132,6 +146,7 @@ namespace ServiceAPIExtensions.Controllers
                     result.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
                 }
             }
+
             return result;
         }
 
