@@ -247,8 +247,8 @@ namespace ServiceAPIExtensions.Controllers
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
             path = path ?? "";
-            var r = FindContentReference(path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            var parentContentRef = FindContentReference(path);
+            if (parentContentRef == ContentReference.EmptyReference) return NotFound();
 
             // Instantiate content of named type.
             if (contentProperties == null)
@@ -267,19 +267,20 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequest($"'{contentTypeString}' is an invalid ContentType");
             }
-
-            // Remove 'ContentType' from properties before iterating properties.
             contentProperties.Remove("ContentType");
 
-            // Check if the object already exists.
-            if (contentProperties.TryGetValue("Name", out object name))
+            if (!contentProperties.TryGetValue("Name", out object nameValue) || !(nameValue is string))
             {
-                var temp = _repo.GetChildren<IContent>(r).Where(ch => ch.Name == (string)name).FirstOrDefault();
-                if (temp != null) return BadRequest($"Content with name '{name}' already exists");
+                return BadRequest("Name is a required field");
             }
+            contentProperties.Remove("Name");
 
-            // Create content.
-            IContent con = _repo.GetDefault<IContent>(r, contentType.ID);
+            var pageName = (string)nameValue;
+
+            if (_repo.GetChildren<IContent>(parentContentRef).Any(ch => ch.Name == pageName))
+            {
+                return BadRequest($"Content with name '{pageName}' already exists");
+            }
 
             EPiServer.DataAccess.SaveAction saveaction = action;
             if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
@@ -287,27 +288,21 @@ namespace ServiceAPIExtensions.Controllers
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
                 contentProperties.Remove("SaveAction");
             }
+            
+            // Create content.
+            IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
 
-            // Set the reference name.
-            string _name = "";
-            if (contentProperties.ContainsKey("Name"))
-            {
-                _name = contentProperties["Name"].ToString();
-                contentProperties.Remove("Name");
-            }
-
-            if (!string.IsNullOrEmpty(_name)) con.Name = _name;
+            content.Name = pageName;
 
             // Set all the other values.
-            var error = UpdateContentWithProperties(contentProperties, con);
+            var error = UpdateContentWithProperties(contentProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference with the requested save action.
-            if (!string.IsNullOrEmpty(_name)) con.Name = _name;
             try
             {
-                var rt = _repo.Save(con, saveaction);
-                return Created<object>(path, new { reference = rt.ID });
+                var createdReference = _repo.Save(content, saveaction);
+                return Created(path, new { reference = createdReference.ID });
             }
             catch (ValidationException ex)
             {
