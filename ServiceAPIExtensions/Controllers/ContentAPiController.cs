@@ -338,18 +338,18 @@ namespace ServiceAPIExtensions.Controllers
             return Ok();
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*Path}")]
-        public virtual IHttpActionResult GetBinaryContent(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*path}")]
+        public virtual IHttpActionResult GetBinaryContent(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            path = path ?? "";
+            var contentRef = FindContentReference(path);
+            if (contentRef == ContentReference.EmptyReference) return NotFound();
                 
-            var cnt = _repo.Get<IContent>(r);
+            var content = _repo.Get<IContent>(contentRef);
 
-            if (cnt is IBinaryStorable)
+            if (content is IBinaryStorable)
             {
-                var binary = cnt as IBinaryStorable;
+                var binary = content as IBinaryStorable;
                 if (binary.BinaryData == null) return NotFound();
 
                 // Return the binary contents as a stream.
@@ -357,8 +357,10 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     var response = new HttpResponseMessage(HttpStatusCode.OK);
                     response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
-                    if (cnt as IContentMedia != null)
-                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
+                    if (content as IContentMedia != null)
+                    {
+                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((content as IContentMedia).MimeType);
+                    }
                     else
                     {
                         response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -367,9 +369,9 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            if (cnt is PageData)
+            if (content is PageData)
             {
-                var page = cnt as PageData;
+                var page = content as PageData;
 
                 string url = string.Format("{0}://{1}:{2}{3}",
                         HttpContext.Current.Request.Url.Scheme,
