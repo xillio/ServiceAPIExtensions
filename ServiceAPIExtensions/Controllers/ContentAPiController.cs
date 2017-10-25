@@ -326,16 +326,15 @@ namespace ServiceAPIExtensions.Controllers
             return null;
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*Path}")]
-        public virtual IHttpActionResult DeleteContent(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*path}")]
+        public virtual IHttpActionResult DeleteContent(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
-            if (r == ContentReference.RootPage && string.IsNullOrEmpty(Path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
-
-            // If its already in the wastebasket delete it, otherwise put it in the wastebasket.
-            _repo.MoveToWastebasket(r);
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
+            if (contentReference == ContentReference.RootPage && string.IsNullOrEmpty(path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
+            
+            _repo.MoveToWastebasket(contentReference);
             return Ok();
         }
 
