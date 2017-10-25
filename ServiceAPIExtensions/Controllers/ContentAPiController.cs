@@ -228,6 +228,10 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var parentContentRef = FindContentReference(path);
             if (parentContentRef == ContentReference.EmptyReference) return NotFound();
+            if(!ReferenceExists(parentContentRef))
+            {
+                return NotFound();
+            }
 
             // Instantiate content of named type.
             if (contentProperties == null)
@@ -287,6 +291,11 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequest(ex.Message);
             }
+        }
+
+        private bool ReferenceExists(ContentReference contentRef)
+        {
+            return _repo.TryGet(contentRef, out IContent cont);
         }
 
         private ContentType FindEpiserverContentType(object contentTypeString)
