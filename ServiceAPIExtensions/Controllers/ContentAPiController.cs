@@ -340,8 +340,15 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
             if (contentReference == ContentReference.RootPage && string.IsNullOrEmpty(path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
-            
-            _repo.MoveToWastebasket(contentReference);
+
+            try
+            {
+                _repo.MoveToWastebasket(contentReference);
+            }
+            catch(ContentNotFoundException e)
+            {
+                return NotFound();
+            }
             return Ok();
         }
 
