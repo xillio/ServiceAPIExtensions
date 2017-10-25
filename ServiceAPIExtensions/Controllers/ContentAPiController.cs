@@ -441,26 +441,19 @@ namespace ServiceAPIExtensions.Controllers
 
             var contentRef = FindContentReference(pageId);
 
-            if(contentRef.Equals(ContentReference.EmptyReference))
+            if (contentRef.Equals(ContentReference.EmptyReference))
             {
                 return NotFound();
             }
 
-            if(!_repo.TryGet(contentRef, out IContent content))
+            if (!_repo.TryGet(contentRef, out IContent content))
             {
                 return NotFound();
             }
 
-            return new JsonResult<object>(
-                new
-                {
-                    TypeName = content.GetOriginalType().Name,
-                    Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
-                }, 
-                new JsonSerializerSettings(),
-                Encoding.UTF8,
-                this);
+            return EpiserverContentTypeResult(content);
         }
+
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
         public virtual IHttpActionResult GetContentType(string Type)
@@ -473,16 +466,23 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             var page = _repo.GetDefault<IContent>(ContentReference.RootPage, episerverType.ID);
-            //we don't use episerverType.PropertyDefinitions since those don't include everything (PageCreated for example)
 
-            return new JsonResult<object>(new
-                {
-                    TypeName = Type,
-                    Properties = page.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
-                },
-                new JsonSerializerSettings(), Encoding.UTF8, this);
+            return EpiserverContentTypeResult(page);
         }
-        
+
+        private IHttpActionResult EpiserverContentTypeResult(IContent content)
+        {
+            return new JsonResult<object>(
+                            new
+                            {
+                                TypeName = content.GetOriginalType().Name,
+                                Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
+                            },
+                            new JsonSerializerSettings(),
+                            Encoding.UTF8,
+                            this);
+        }
+
         private void WriteBlobToStorage(string name, byte[] data, MediaData md)
         {
             var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, Path.GetExtension(name));
