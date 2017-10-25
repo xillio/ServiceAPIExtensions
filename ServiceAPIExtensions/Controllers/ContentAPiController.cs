@@ -434,32 +434,32 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{Path}")]
-        public virtual IHttpActionResult GetContentTypeByPath(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{pageId}")]
+        public virtual IHttpActionResult GetContentTypeByPageId(string pageId)
         {
-            Path = Path ?? "";
+            pageId = pageId ?? "";
 
-            var reference = FindContentReference(Path);
+            var contentRef = FindContentReference(pageId);
 
-            if(reference.Equals(ContentReference.EmptyReference))
+            if(contentRef.Equals(ContentReference.EmptyReference))
             {
                 return NotFound();
             }
 
-            if(!_repo.TryGet(reference, out IContent content))
+            if(!_repo.TryGet(contentRef, out IContent content))
             {
                 return NotFound();
             }
 
-            //var page = _repo.GetDefault<IContent>(ContentReference.RootPage, reference.ID);
-            //we don't use episerverType.PropertyDefinitions since those don't include everything (PageCreated for example)
-
-            return new JsonResult<object>(new
-            {
-                TypeName = content.GetOriginalType().Name,
-                Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
-            },
-                new JsonSerializerSettings(), Encoding.UTF8, this);
+            return new JsonResult<object>(
+                new
+                {
+                    TypeName = content.GetOriginalType().Name,
+                    Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
+                }, 
+                new JsonSerializerSettings(),
+                Encoding.UTF8,
+                this);
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
