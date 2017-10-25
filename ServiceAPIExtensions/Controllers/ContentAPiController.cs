@@ -234,7 +234,7 @@ namespace ServiceAPIExtensions.Controllers
             }
             
             // Store the new information in the object.
-            UpdateContentWithProperties(newProperties, content, out string error);
+            var error = UpdateContentWithProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference and publish if requested.
@@ -290,7 +290,7 @@ namespace ServiceAPIExtensions.Controllers
             if (!string.IsNullOrEmpty(_name)) con.Name = _name;
 
             // Set all the other values.
-            UpdateContentWithProperties(properties, con, out string error);
+            var error = UpdateContentWithProperties(properties, con);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference with the requested save action.
@@ -473,29 +473,31 @@ namespace ServiceAPIExtensions.Controllers
             md.BinaryData = blob;
         }
 
-        private void UpdateContentWithProperties(IDictionary<string, object> properties, IContent con, out string error)
+        private string UpdateContentWithProperties(IDictionary<string, object> properties, IContent content)
         {
-            error = "";
-            foreach (var k in properties.Keys)
+            foreach (var propertyName in properties.Keys)
             {
-                UpdateFieldOnContent(properties, con, k, out error);
-                if (!string.IsNullOrEmpty(error)) return;
+                var errorMessage = UpdateFieldOnContent(properties, content, propertyName);
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    return errorMessage;
+                }
             }
+            return null;
         }
 
-        private void UpdateFieldOnContent(IDictionary<string, object> properties, IContent con, string k, out string error)
+        private string UpdateFieldOnContent(IDictionary<string, object> properties, IContent con, string propertyName)
         {
-            error = "";
             //Problem: con might only contain very few properties (not inherited)
-            if (con.Property.Contains(k))
+            if (con.Property.Contains(propertyName))
             {
 
-                if (con.Property[k] is EPiServer.SpecializedProperties.PropertyContentArea)
+                if (con.Property[propertyName] is EPiServer.SpecializedProperties.PropertyContentArea)
                 {
                     //Handle if property is Content Area.
-                    if (con.Property[k].Value == null) con.Property[k].Value = new ContentArea();
-                    ContentArea ca = con.Property[k].Value as ContentArea;
-                    var lst = properties[k];
+                    if (con.Property[propertyName].Value == null) con.Property[propertyName].Value = new ContentArea();
+                    ContentArea ca = con.Property[propertyName].Value as ContentArea;
+                    var lst = properties[propertyName];
                     if (lst is List<object>)
                     {
                         foreach (var s in (lst as List<object>))
@@ -505,36 +507,37 @@ namespace ServiceAPIExtensions.Controllers
                         }
                     }
                 }
-                else if (properties[k] is string[])
+                else if (properties[propertyName] is string[])
                 {
-                    con.Property[k].Value = properties[k] as string[];
+                    con.Property[propertyName].Value = properties[propertyName] as string[];
                 }
-                else if (con.Property[k].GetType() == typeof(EPiServer.Core.PropertyDate))
+                else if (con.Property[propertyName].GetType() == typeof(EPiServer.Core.PropertyDate))
                 {
-                    if (properties[k] is DateTime)
+                    if (properties[propertyName] is DateTime)
                     {
-                        con.Property[k].Value = properties[k];
+                        con.Property[propertyName].Value = properties[propertyName];
                     }
                     else
                     {
-                        con.Property[k].ParseToSelf((string)properties[k]);
+                        con.Property[propertyName].ParseToSelf((string)properties[propertyName]);
                     }
                 }
                 else
                 {
-                    con.Property[k].Value = properties[k];
+                    con.Property[propertyName].Value = properties[propertyName];
                 }
+                return null;
             }
-            else if (k.ToLower() == "binarydata" && con is MediaData)
+
+            if (propertyName.ToLower() == "binarydata" && con is MediaData)
             {
-                dynamic binitm = properties[k];
+                dynamic binitm = properties[propertyName];
                 byte[] bytes = Convert.FromBase64String(binitm);
                 WriteBlobToStorage(con.Name ?? (string)properties["Name"], bytes, con as MediaData);
-            } else
-            {
-                error = k;
-                return;
+                return null;
             }
+
+            return propertyName;
         }
 
         /// <summary>
