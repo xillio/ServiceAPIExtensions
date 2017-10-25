@@ -2,10 +2,7 @@
 using EPiServer.Core;
 using EPiServer.Core.Transfer;
 using EPiServer.DataAbstraction;
-using EPiServer.ServiceApi.Models;
 using EPiServer.ServiceLocation;
-using EPiServer.SpecializedProperties;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
@@ -18,10 +15,8 @@ using System.Web.Http.Results;
 using EPiServer.ServiceApi.Configuration;
 using EPiServer.Framework.Blobs;
 using System.IO;
-using EPiServer.Web.Routing;
 using EPiServer.Data.Entity;
 using EPiServer.Web.Internal;
-using System.Reflection;
 using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
@@ -29,31 +24,44 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ServiceAPIExtensions.Controllers
 {
-    [/*AuthorizePermission("EPiServerServiceApi", "WriteAccess"),*/ RequireHttps, RoutePrefix("episerverapi/content")]
+    [RequireHttps, RoutePrefix("episerverapi/content")]
     public class ContentAPiController : ApiController
     {
-        protected IContentRepository _repo = ServiceLocator.Current.GetInstance<IContentRepository>();
-        protected IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
-        protected IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
-        protected BlobFactory _blobfactory = ServiceLocator.Current.GetInstance<BlobFactory>();
-        
+        IContentRepository _repo = ServiceLocator.Current.GetInstance<IContentRepository>();
+        IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
+        IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
+        IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
+
+        readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
+        {
+            { "", ContentReference.RootPage },
+            { "root" , ContentReference.RootPage },
+            { "start" , ContentReference.StartPage },
+            { "globalblock" , ContentReference.GlobalBlockFolder },
+            { "siteblock" , ContentReference.SiteBlockFolder }
+        };
+
         /// <summary>
         /// Finds the content with the given name
         /// </summary>
-        /// <param name="Ref">The name of the content</param>
+        /// <param name="reference">The name of the content</param>
         /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        protected ContentReference LookupRef(string Ref)
+        ContentReference FindContentReferenceByString(string reference)
         {
-            if (Ref == "") return ContentReference.RootPage;
-            if (Ref.ToLower() == "root") return ContentReference.RootPage;
-            if (Ref.ToLower() == "start") return ContentReference.StartPage;
-            if (Ref.ToLower() == "globalblock") return ContentReference.GlobalBlockFolder;
-            if (Ref.ToLower() == "siteblock") return ContentReference.SiteBlockFolder;
-            
-            if (ContentReference.TryParse(Ref, out ContentReference c)) return c;
+            if(constantContentReferenceMap.ContainsKey(reference.ToLower()))
+            {
+                return constantContentReferenceMap[reference.ToLower()];
+            }
 
-            Guid g=Guid.Empty;
-            if (Guid.TryParse(Ref, out g)) EPiServer.Web.PermanentLinkUtility.FindContentReference(g);
+            if (ContentReference.TryParse(reference, out ContentReference parsedReference))
+            {
+                return parsedReference;
+            }
+
+            if (Guid.TryParse(reference, out Guid parsedGuid))
+            {
+                return EPiServer.Web.PermanentLinkUtility.FindContentReference(parsedGuid);
+            }
             return ContentReference.EmptyReference;
         }
 
@@ -507,7 +515,7 @@ namespace ServiceAPIExtensions.Controllers
                     {
                         foreach (var s in (lst as List<object>))
                         {
-                            var itmref = LookupRef(s.ToString());
+                            var itmref = FindContentReferenceByString(s.ToString());
                             ca.Items.Add(new ContentAreaItem() { ContentLink = itmref });
                         }
                     }
@@ -562,7 +570,7 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             var parts = Path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            var r = LookupRef(parts.First());
+            var r = FindContentReferenceByString(parts.First());
             foreach (var k in parts.Skip(1))
             {
                 r = LookupRef(r, k);
