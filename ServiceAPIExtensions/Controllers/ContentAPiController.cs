@@ -65,7 +65,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
 
-        public static Dictionary<string, object> MapContent(IContent content)
+        static Dictionary<string, object> MapContent(IContent content)
         {
             if (content == null)
             {
@@ -214,7 +214,7 @@ namespace ServiceAPIExtensions.Controllers
             }
             
             // Store the new information in the object.
-            var error = UpdateContentWithProperties(newProperties, content);
+            var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference and publish if requested.
@@ -274,7 +274,7 @@ namespace ServiceAPIExtensions.Controllers
             content.Name = pageName;
 
             // Set all the other values.
-            var error = UpdateContentWithProperties(contentProperties, content);
+            var error = UpdateContentProperties(contentProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference with the requested save action.
@@ -480,11 +480,11 @@ namespace ServiceAPIExtensions.Controllers
             md.BinaryData = blob;
         }
 
-        private string UpdateContentWithProperties(IDictionary<string, object> properties, IContent content)
+        private string UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
         {
-            foreach (var propertyName in properties.Keys)
+            foreach (var propertyName in newProperties.Keys)
             {
-                var errorMessage = UpdateFieldOnContent(properties, content, propertyName);
+                var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"],  propertyName, newProperties[propertyName]);
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
                     return errorMessage;
@@ -493,7 +493,7 @@ namespace ServiceAPIExtensions.Controllers
             return null;
         }
 
-        private string UpdateFieldOnContent(IDictionary<string, object> properties, IContent con, string propertyName)
+        private string UpdateFieldOnContent(IContent con, string contentName, string propertyName, object value)
         {
             //Problem: con might only contain very few properties (not inherited)
             if (con.Property.Contains(propertyName))
@@ -504,8 +504,8 @@ namespace ServiceAPIExtensions.Controllers
                     //Handle if property is Content Area.
                     if (con.Property[propertyName].Value == null) con.Property[propertyName].Value = new ContentArea();
                     ContentArea ca = con.Property[propertyName].Value as ContentArea;
-                    var lst = properties[propertyName];
-                    if (lst is List<object>)
+                    var lst = value as List<object>;
+                    if (lst != null)
                     {
                         foreach (var s in (lst as List<object>))
                         {
@@ -514,33 +514,32 @@ namespace ServiceAPIExtensions.Controllers
                         }
                     }
                 }
-                else if (properties[propertyName] is string[])
+                else if (value is string[])
                 {
-                    con.Property[propertyName].Value = properties[propertyName] as string[];
+                    con.Property[propertyName].Value = value as string[];
                 }
                 else if (con.Property[propertyName].GetType() == typeof(EPiServer.Core.PropertyDate))
                 {
-                    if (properties[propertyName] is DateTime)
+                    if (value is DateTime)
                     {
-                        con.Property[propertyName].Value = properties[propertyName];
+                        con.Property[propertyName].Value = value;
                     }
                     else
                     {
-                        con.Property[propertyName].ParseToSelf((string)properties[propertyName]);
+                        con.Property[propertyName].ParseToSelf((string)value);
                     }
                 }
                 else
                 {
-                    con.Property[propertyName].Value = properties[propertyName];
+                    con.Property[propertyName].Value = value;
                 }
                 return null;
             }
 
             if (propertyName.ToLower() == "binarydata" && con is MediaData)
             {
-                dynamic binitm = properties[propertyName];
-                byte[] bytes = Convert.FromBase64String(binitm);
-                WriteBlobToStorage(con.Name ?? (string)properties["Name"], bytes, con as MediaData);
+                byte[] bytes = Convert.FromBase64String((string)value);
+                WriteBlobToStorage(contentName, bytes, con as MediaData);
                 return null;
             }
 
