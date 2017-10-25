@@ -122,7 +122,7 @@ namespace ServiceAPIExtensions.Controllers
 
                     result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent())).ToList());
                 }
-                else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[])
+                else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
                     result.Add(pi.Name, pi.Value);
                 }
