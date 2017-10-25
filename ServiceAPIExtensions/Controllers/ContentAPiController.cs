@@ -485,7 +485,14 @@ namespace ServiceAPIExtensions.Controllers
 
         private void WriteBlobToStorage(string name, byte[] data, MediaData md)
         {
-            var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, Path.GetExtension(name));
+            var extension = Path.GetExtension(name);
+
+            if(string.IsNullOrWhiteSpace(extension))
+            {
+                extension = ".bin";
+            }
+
+            var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, extension);
             using (var writer = new BinaryWriter(blob.OpenWrite()))
             {
                 writer.Write(data);
