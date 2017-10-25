@@ -93,30 +93,30 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
         
-        public static Dictionary<string, object> ConstructExpandoObject(IContent c)
+        public static Dictionary<string, object> ConstructExpandoObject(IContent content)
         {
-            if (c == null)
+            if (content == null)
             {
                 return null;
             }
             var result = new Dictionary<string, object>();
             
-            result["Name"] = c.Name;
-            result["ParentLink"] = c.ParentLink;
-            result["ContentGuid"] = c.ContentGuid;
-            result["ContentLink"] = c.ContentLink;
-            result["ContentTypeID"] = c.ContentTypeID;
-            result["__EpiserverContentType"] = GetContentType(c);
+            result["Name"] = content.Name;
+            result["ParentLink"] = content.ParentLink;
+            result["ContentGuid"] = content.ContentGuid;
+            result["ContentLink"] = content.ContentLink;
+            result["ContentTypeID"] = content.ContentTypeID;
+            result["__EpiserverContentType"] = GetContentType(content);
 
-            var content = c as IBinaryStorable;
+            var binaryContent = content as IBinaryStorable;
 
-            if (content!=null)
+            if (binaryContent!=null)
             {
                 // IF the content has binarydata, get the Hash and size.
 
-                if (content.BinaryData != null)
+                if (binaryContent.BinaryData != null)
                 {
-                    using (Stream stream = content.BinaryData.OpenRead())
+                    using (Stream stream = binaryContent.BinaryData.OpenRead())
                     {
                         result.Add("MD5", Hash(stream, MD5.Create()));
                         result.Add("SHA1", Hash(stream, SHA1.Create()));
@@ -129,46 +129,46 @@ namespace ServiceAPIExtensions.Controllers
                     result.Add("FileSize", 0);
                 }
 
-                if (c is MediaData)
-                    result.Add("MimeType", (c as MediaData).MimeType);
-            }
-            
-            foreach (var pi in c.Property)
-            {
-                if (pi.Value != null)
+                if (content is MediaData)
                 {
-                    if (pi.Type == PropertyDataType.Block)
-                    {
-                        //TODO: Doesn't work. Check SiteLogoType on start page
-                        if(pi.Value is IContent)  result.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
-                    }
-                    else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
-                    {
-                        //TODO: Loop through and make array
-                        var pca = pi as EPiServer.SpecializedProperties.PropertyContentArea;
-                        ContentArea ca = pca.Value as ContentArea;
-                        var lst=new List<Dictionary<string,object>>();
-                        foreach(var itm in ca.Items){
-                            var itmobj = ConstructExpandoObject(itm.GetContent());
-                            lst.Add(itmobj);
-                        }
-                        result.Add(pi.Name, lst.ToArray());
-
-                    } 
-                    else if (pi.Value is string[])
-                    {
-                        result.Add(pi.Name, (pi.Value as string[]));
-                    }
-                    else if (pi.Value is Int32  || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double)
-                    {
-                        result.Add(pi.Name, pi.Value);
-                    }
-                    else { 
-                        //TODO: Handle different return values
-                        result.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
-                    }
+                    result.Add("MimeType", (content as MediaData).MimeType);
                 }
-                    
+            }
+
+            foreach (var pi in content.Property.Where(p => p.Value != null))
+            {
+                if (pi.Type == PropertyDataType.Block)
+                {
+                    //TODO: Doesn't work. Check SiteLogoType on start page
+                    if (pi.Value is IContent) result.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
+                }
+                else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
+                {
+                    //TODO: Loop through and make array
+                    var pca = pi as EPiServer.SpecializedProperties.PropertyContentArea;
+                    ContentArea ca = pca.Value as ContentArea;
+                    var lst = new List<Dictionary<string, object>>();
+                    foreach (var itm in ca.Items)
+                    {
+                        var itmobj = ConstructExpandoObject(itm.GetContent());
+                        lst.Add(itmobj);
+                    }
+                    result.Add(pi.Name, lst.ToArray());
+
+                }
+                else if (pi.Value is string[])
+                {
+                    result.Add(pi.Name, (pi.Value as string[]));
+                }
+                else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double)
+                {
+                    result.Add(pi.Name, pi.Value);
+                }
+                else
+                {
+                    //TODO: Handle different return values
+                    result.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
+                }
             }
             return result;
         }
