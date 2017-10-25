@@ -388,8 +388,11 @@ namespace ServiceAPIExtensions.Controllers
         {
             path = path ?? "";
             var contentReference = FindContentReference(path);
-            if (contentReference == ContentReference.EmptyReference ||
-                !_repo.TryGet(contentReference, out IContent parentContent)) return NotFound();
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
+
+            if (!_repo.TryGet(contentReference, out IContent parentContent)) {
+                return NotFound();
+            }
 
             var children = new List<Dictionary<string, object>>();
 
