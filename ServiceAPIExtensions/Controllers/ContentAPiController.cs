@@ -93,7 +93,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
         
-        public static Dictionary<string, object> ConstructExpandoObject(IContent content)
+        public static Dictionary<string, object> MapContent(IContent content)
         {
             if (content == null)
             {
@@ -137,24 +137,18 @@ namespace ServiceAPIExtensions.Controllers
 
             foreach (var pi in content.Property.Where(p => p.Value != null))
             {
-                if (pi.Type == PropertyDataType.Block)
+                if (pi.Type == PropertyDataType.Block && pi.Value is IContent)
                 {
                     //TODO: Doesn't work. Check SiteLogoType on start page
-                    if (pi.Value is IContent) result.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
+                    result.Add(pi.Name, MapContent((IContent)pi.Value));
                 }
                 else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
                 {
                     //TODO: Loop through and make array
-                    var pca = pi as EPiServer.SpecializedProperties.PropertyContentArea;
-                    ContentArea ca = pca.Value as ContentArea;
-                    var lst = new List<Dictionary<string, object>>();
-                    foreach (var itm in ca.Items)
-                    {
-                        var itmobj = ConstructExpandoObject(itm.GetContent());
-                        lst.Add(itmobj);
-                    }
-                    result.Add(pi.Name, lst.ToArray());
-
+                    var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
+                    ContentArea contentArea = propertyContentArea.Value as ContentArea;
+                    
+                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent())).ToList());
                 }
                 else if (pi.Value is string[])
                 {
@@ -382,19 +376,19 @@ namespace ServiceAPIExtensions.Controllers
             var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(r).Select(x => ConstructExpandoObject(x)));
+            children.AddRange(_repo.GetChildren<IContent>(r).Select(x => MapContent(x)));
 
             if (parent is PageData)
             {
                 // Collect Main Content
                 var main = (parent.Property.Get("MainContentArea")?.Value as ContentArea);
                 if (main != null)
-                    children.AddRange(main.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
+                    children.AddRange(main.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
                 
                 // Collect Related Content
                 var related = (parent.Property.Get("RelatedContentArea")?.Value as ContentArea);
                 if (related != null)
-                    children.AddRange(related.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
+                    children.AddRange(related.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
             }
 
             return Ok(children.ToArray());
@@ -411,7 +405,7 @@ namespace ServiceAPIExtensions.Controllers
             {
                 var content = _repo.Get<IContent>(r);
                 if (content.IsDeleted) return NotFound();
-                return Ok(ConstructExpandoObject(content));
+                return Ok(MapContent(content));
             }
             catch(ContentNotFoundException)
             {
