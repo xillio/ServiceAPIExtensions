@@ -192,55 +192,54 @@ namespace ServiceAPIExtensions.Controllers
             return $"Unknown (ContentTypeID={c.ContentTypeID})";
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*Path}")]
-        public virtual IHttpActionResult UpdateContent(string Path, [FromBody] Dictionary<string,object> Updated, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*path}")]
+        public virtual IHttpActionResult UpdateContent(string path, [FromBody] Dictionary<string,object> newProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
-            if (r == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
+            var contentRef = FindContentReference(path??"");
+            if (contentRef == ContentReference.EmptyReference) return NotFound();
+            if (contentRef == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
 
-            if(!_repo.TryGet(r, out IContent content))
+            if(!_repo.TryGet(contentRef, out IContent originalContent))
             {
                 return NotFound();
             }
 
-            content = (content as IReadOnly).CreateWritableClone() as IContent;
-            var dic = Updated as IDictionary<string, object>;
+            var content = (originalContent as IReadOnly).CreateWritableClone() as IContent;
+            
             EPiServer.DataAccess.SaveAction saveaction = action;
-            if (dic.ContainsKey("SaveAction") && ((string)dic["SaveAction"]) == "Publish")
+            if (newProperties.ContainsKey("SaveAction") && ((string)newProperties["SaveAction"]) == "Publish")
             {
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
-                dic.Remove("SaveAction");
+                newProperties.Remove("SaveAction");
             }
 
-            if(dic.ContainsKey("__EpiserverMoveEntityTo"))
+            if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
             {
                 try
                 {
-                    var moveTo = FindContentReference((string)dic["__EpiserverMoveEntityTo"]);
-                    _repo.Move(r, moveTo);
+                    var moveTo = FindContentReference((string)newProperties["__EpiserverMoveEntityTo"]);
+                    _repo.Move(contentRef, moveTo);
                 }
                 catch(ContentNotFoundException)
                 {
                     return BadRequest("target page not found");
                 }
-                dic.Remove("__EpiserverMoveEntityTo");
+                newProperties.Remove("__EpiserverMoveEntityTo");
             }
 
-            if(dic.ContainsKey("Name"))
+            if(newProperties.ContainsKey("Name"))
             {
-                content.Name = dic["Name"].ToString();
-                dic.Remove("Name");
+                content.Name = newProperties["Name"].ToString();
+                newProperties.Remove("Name");
             }
             
             // Store the new information in the object.
-            UpdateContentWithProperties(dic, content, out string error);
+            UpdateContentWithProperties(newProperties, content, out string error);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference and publish if requested.
-            var rt = _repo.Save(content, saveaction);
-            return Ok(new { reference = rt.ToString() });
+            var updatedReference = _repo.Save(content, saveaction);
+            return Ok(new { reference = updatedReference.ToString() });
         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*Path}")]
