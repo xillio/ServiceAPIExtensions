@@ -486,11 +486,10 @@ namespace ServiceAPIExtensions.Controllers
         private void WriteBlobToStorage(string name, byte[] data, MediaData md)
         {
             var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, Path.GetExtension(name));
-            using (var s = blob.OpenWrite())
+            using (var writer = new BinaryWriter(blob.OpenWrite()))
             {
-                BinaryWriter w = new BinaryWriter(s);
-                w.Write(data);
-                w.Flush();
+                writer.Write(data);
+                writer.Flush(); // this is probably not necessary because of the dispose
             }
             md.BinaryData = blob;
         }
