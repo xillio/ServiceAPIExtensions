@@ -93,12 +93,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
         
-        public static ExpandoObject ConstructExpandoObject(IContent c, string Select=null)
-        {
-            return ConstructExpandoObject(c,true, Select);
-        }
-
-        public static ExpandoObject ConstructExpandoObject(IContent c, bool IncludeBinary,string Select=null)
+        public static ExpandoObject ConstructExpandoObject(IContent c)
         {
             dynamic e = new ExpandoObject();
             var dic=e as IDictionary<string,object>;
@@ -111,8 +106,6 @@ namespace ServiceAPIExtensions.Controllers
             e.ContentLink = c.ContentLink;
             e.ContentTypeID = c.ContentTypeID;
             e.__EpiserverContentType = GetContentType(c);
-            //TODO: Resolve Content Type
-            var parts = (Select == null) ? null : Select.Split(',');
 
             var content = c as IBinaryStorable;
 
@@ -141,8 +134,6 @@ namespace ServiceAPIExtensions.Controllers
             
             foreach (var pi in c.Property)
             {
-                if (parts != null && (!parts.Contains(pi.Name))) continue;
-
                 if (pi.Value != null)
                 {
                     if (pi.Type == PropertyDataType.Block)
