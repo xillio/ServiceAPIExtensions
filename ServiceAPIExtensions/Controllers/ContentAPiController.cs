@@ -46,7 +46,7 @@ namespace ServiceAPIExtensions.Controllers
         /// </summary>
         /// <param name="reference">The name of the content</param>
         /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        ContentReference FindContentReferenceByString(string reference)
+        ContentReference FindContentReference(string reference)
         {
             if(constantContentReferenceMap.ContainsKey(reference.ToLower()))
             {
@@ -65,34 +65,6 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
 
-        /// <summary>
-        /// Finds the content with a given name of its parent. Favours URLEncoded name over actual name.
-        /// </summary>
-        /// <param name="Parent">The reference to the parent</param>
-        /// <param name="Name">The name of the content</param>
-        /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        protected ContentReference LookupRef(ContentReference Parent, string Name)
-        {
-            if (Parent.Equals(ContentReference.EmptyReference))
-            {
-                return ContentReference.EmptyReference;
-            }
-
-            var content = (new UrlSegment(_repo)).GetContentBySegment(Parent, Name);
-            if (content != null && !content.Equals(ContentReference.EmptyReference))
-            {
-                return content;
-            }
-            
-            var temp = _repo.GetChildren<IContent>(Parent).Where(ch => SegmentedName(ch.Name) == Name).FirstOrDefault();
-            if (temp != null)
-            {
-                return temp.ContentLink;
-            }
-
-            return ContentReference.EmptyReference;
-        }
-        
         public static Dictionary<string, object> MapContent(IContent content)
         {
             if (content == null)
@@ -537,7 +509,7 @@ namespace ServiceAPIExtensions.Controllers
                     {
                         foreach (var s in (lst as List<object>))
                         {
-                            var itmref = FindContentReferenceByString(s.ToString());
+                            var itmref = FindContentReference(s.ToString());
                             ca.Items.Add(new ContentAreaItem() { ContentLink = itmref });
                         }
                     }
@@ -574,37 +546,7 @@ namespace ServiceAPIExtensions.Controllers
 
             return propertyName;
         }
-
-        /// <summary>
-        /// Transforms a name into an URLEncoded name.
-        /// </summary>
-        /// <param name="name">The origional name</param>
-        /// <returns>An URLEncoded name</returns>
-        private string SegmentedName(string name)
-        {
-            return name.Replace(' ', '-').ToLower();
-        }
-
-        private ContentReference FindContentReference(string path)
-        {
-            return FindContentReferenceByString(path);
-
-            //if (String.IsNullOrEmpty(path))
-            //{
-            //    return ContentReference.RootPage;
-            //}
-
-            //var parts = path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            //var r = FindContentReferenceByString(parts.First());
-            //foreach (var k in parts.Skip(1))
-            //{
-            //    r = LookupRef(r, k);
-            //}
-
-            //return r;
-        }
-        
-
+                
         private static string Hash(Stream stream, HashAlgorithm hashing)
         {
             StringBuilder sBuilder = new StringBuilder();
