@@ -93,19 +93,20 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
         
-        public static ExpandoObject ConstructExpandoObject(IContent c)
+        public static Dictionary<string, object> ConstructExpandoObject(IContent c)
         {
-            dynamic e = new ExpandoObject();
-            var dic=e as IDictionary<string,object>;
-
-            if (c == null) return null;
-
-            e.Name = c.Name;
-            e.ParentLink = c.ParentLink;
-            e.ContentGuid = c.ContentGuid;
-            e.ContentLink = c.ContentLink;
-            e.ContentTypeID = c.ContentTypeID;
-            e.__EpiserverContentType = GetContentType(c);
+            if (c == null)
+            {
+                return null;
+            }
+            var result = new Dictionary<string, object>();
+            
+            result["Name"] = c.Name;
+            result["ParentLink"] = c.ParentLink;
+            result["ContentGuid"] = c.ContentGuid;
+            result["ContentLink"] = c.ContentLink;
+            result["ContentTypeID"] = c.ContentTypeID;
+            result["__EpiserverContentType"] = GetContentType(c);
 
             var content = c as IBinaryStorable;
 
@@ -117,19 +118,19 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     using (Stream stream = content.BinaryData.OpenRead())
                     {
-                        dic.Add("MD5", Hash(stream, MD5.Create()));
-                        dic.Add("SHA1", Hash(stream, SHA1.Create()));
-                        dic.Add("SHA256", Hash(stream, SHA256.Create()));
-                        dic.Add("FileSize", stream.Length);
+                        result.Add("MD5", Hash(stream, MD5.Create()));
+                        result.Add("SHA1", Hash(stream, SHA1.Create()));
+                        result.Add("SHA256", Hash(stream, SHA256.Create()));
+                        result.Add("FileSize", stream.Length);
                     }
                 }
                 else
                 {
-                    dic.Add("FileSize", 0);
+                    result.Add("FileSize", 0);
                 }
 
                 if (c is MediaData)
-                    dic.Add("MimeType", (c as MediaData).MimeType);
+                    result.Add("MimeType", (c as MediaData).MimeType);
             }
             
             foreach (var pi in c.Property)
@@ -139,37 +140,37 @@ namespace ServiceAPIExtensions.Controllers
                     if (pi.Type == PropertyDataType.Block)
                     {
                         //TODO: Doesn't work. Check SiteLogoType on start page
-                        if(pi.Value is IContent)  dic.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
+                        if(pi.Value is IContent)  result.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
                     }
                     else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
                     {
                         //TODO: Loop through and make array
                         var pca = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                         ContentArea ca = pca.Value as ContentArea;
-                        List<ExpandoObject> lst=new List<ExpandoObject>();
+                        var lst=new List<Dictionary<string,object>>();
                         foreach(var itm in ca.Items){
-                            dynamic itmobj = ConstructExpandoObject(itm.GetContent());
+                            var itmobj = ConstructExpandoObject(itm.GetContent());
                             lst.Add(itmobj);
                         }
-                        dic.Add(pi.Name, lst.ToArray());
+                        result.Add(pi.Name, lst.ToArray());
 
                     } 
                     else if (pi.Value is string[])
                     {
-                        dic.Add(pi.Name, (pi.Value as string[]));
+                        result.Add(pi.Name, (pi.Value as string[]));
                     }
                     else if (pi.Value is Int32  || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double)
                     {
-                        dic.Add(pi.Name, pi.Value);
+                        result.Add(pi.Name, pi.Value);
                     }
                     else { 
                         //TODO: Handle different return values
-                        dic.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
+                        result.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
                     }
                 }
                     
             }
-            return e;
+            return result;
         }
 
         private static string GetContentType(IContent c)
@@ -378,7 +379,7 @@ namespace ServiceAPIExtensions.Controllers
             if (r == ContentReference.EmptyReference ||
                 !_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
 
-            List<ExpandoObject> children = new List<ExpandoObject>();
+            var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
             children.AddRange(_repo.GetChildren<IContent>(r).Select(x => ConstructExpandoObject(x)));
