@@ -218,7 +218,14 @@ namespace ServiceAPIExtensions.Controllers
             {
                 try
                 {
-                    var moveTo = FindContentReference((string)newProperties["__EpiserverMoveEntityTo"]);
+                    var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+
+                    if(!moveToPath.StartsWith("/"))
+                    {
+                        return BadRequest("__EpiserverMoveEntityTo should start with a /");
+                    }
+
+                    var moveTo = FindContentReference(moveToPath.Substring(1));
                     _repo.Move(contentRef, moveTo);
                 }
                 catch(ContentNotFoundException)
@@ -571,21 +578,23 @@ namespace ServiceAPIExtensions.Controllers
             return name.Replace(' ', '-').ToLower();
         }
 
-        private ContentReference FindContentReference(string Path)
+        private ContentReference FindContentReference(string path)
         {
-            if (String.IsNullOrEmpty(Path))
-            {
-                return ContentReference.RootPage;
-            }
+            return FindContentReferenceByString(path);
 
-            var parts = Path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            var r = FindContentReferenceByString(parts.First());
-            foreach (var k in parts.Skip(1))
-            {
-                r = LookupRef(r, k);
-            }
+            //if (String.IsNullOrEmpty(path))
+            //{
+            //    return ContentReference.RootPage;
+            //}
 
-            return r;
+            //var parts = path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            //var r = FindContentReferenceByString(parts.First());
+            //foreach (var k in parts.Skip(1))
+            //{
+            //    r = LookupRef(r, k);
+            //}
+
+            //return r;
         }
         
 
