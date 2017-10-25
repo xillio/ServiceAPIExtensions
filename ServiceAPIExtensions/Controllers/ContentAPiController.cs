@@ -386,28 +386,28 @@ namespace ServiceAPIExtensions.Controllers
             return StatusCode(HttpStatusCode.NoContent);
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*Path}")]
-        public virtual IHttpActionResult GetChildren(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
+        public virtual IHttpActionResult GetChildren(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference ||
-                !_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference ||
+                !_repo.TryGet(contentReference, out IContent parentContent)) return NotFound();
 
             var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(r).Select(x => MapContent(x)));
+            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x)));
 
-            if (parent is PageData)
+            if (parentContent is PageData)
             {
                 // Collect Main Content
-                var main = (parent.Property.Get("MainContentArea")?.Value as ContentArea);
+                var main = (parentContent.Property.Get("MainContentArea")?.Value as ContentArea);
                 if (main != null)
                     children.AddRange(main.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
                 
                 // Collect Related Content
-                var related = (parent.Property.Get("RelatedContentArea")?.Value as ContentArea);
+                var related = (parentContent.Property.Get("RelatedContentArea")?.Value as ContentArea);
                 if (related != null)
                     children.AddRange(related.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
             }
