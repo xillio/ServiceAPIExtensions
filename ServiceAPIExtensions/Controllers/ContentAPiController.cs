@@ -415,16 +415,16 @@ namespace ServiceAPIExtensions.Controllers
             return Ok(children.ToArray());
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("entity/{*Path}")]
-        public virtual IHttpActionResult GetEntity(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("entity/{*path}")]
+        public virtual IHttpActionResult GetEntity(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
 
             try
             {
-                var content = _repo.Get<IContent>(r);
+                var content = _repo.Get<IContent>(contentReference);
                 if (content.IsDeleted) return NotFound();
                 return Ok(MapContent(content));
             }
