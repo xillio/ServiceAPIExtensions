@@ -201,23 +201,14 @@ namespace ServiceAPIExtensions.Controllers
                 newProperties.Remove("SaveAction");
             }
 
+            string moveToPath = null;
+
             if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
             {
-                try
+                moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+                if (!moveToPath.StartsWith("/"))
                 {
-                    var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
-
-                    if(!moveToPath.StartsWith("/"))
-                    {
-                        return BadRequest("__EpiserverMoveEntityTo should start with a /");
-                    }
-
-                    var moveTo = FindContentReference(moveToPath.Substring(1));
-                    _repo.Move(contentRef, moveTo);
-                }
-                catch(ContentNotFoundException)
-                {
-                    return BadRequest("target page not found");
+                    return BadRequest("__EpiserverMoveEntityTo should start with a /");
                 }
                 newProperties.Remove("__EpiserverMoveEntityTo");
             }
@@ -232,9 +223,28 @@ namespace ServiceAPIExtensions.Controllers
             var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
+            if (moveToPath != null)
+            {
+                try
+                {
+                    var moveTo = FindContentReference(moveToPath.Substring(1));
+                    _repo.Move(contentRef, moveTo);
+                }
+                catch (ContentNotFoundException)
+                {
+                    return BadRequest("target page not found");
+                }
+            }
             // Save the reference and publish if requested.
-            var updatedReference = _repo.Save(content, saveaction);
-            return Ok(new { reference = updatedReference.ToString() });
+            try
+            {
+                var updatedReference = _repo.Save(content, saveaction);
+                return Ok(new { reference = updatedReference.ToString() });
+            }
+            catch(ValidationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
