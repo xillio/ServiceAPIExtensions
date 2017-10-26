@@ -65,7 +65,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
 
-        static Dictionary<string, object> MapContent(IContent content)
+        static Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining)
         {
             if (content == null)
             {
@@ -107,7 +107,7 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            foreach(var property in MapProperties(content.Property))
+            foreach(var property in MapProperties(content.Property, recurseContentLevelsRemaining))
             {
                 result.Add(property.Key, property.Value);
             }
@@ -115,7 +115,7 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private static Dictionary<string, object> MapProperties(PropertyDataCollection properties)
+        private static Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining)
         {
             var result = new Dictionary<string, object>();
             foreach (var pi in properties.Where(p => p.Value != null))
@@ -125,16 +125,20 @@ namespace ServiceAPIExtensions.Controllers
                     var contentData = pi.Value as IContentData;
                     if (contentData!=null)
                     {
-                        result.Add(pi.Name, MapProperties(contentData.Property));
+                        result.Add(pi.Name, MapProperties(contentData.Property, recurseContentLevelsRemaining-1));
                     }
                 }
                 else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
                 {
+                    if(recurseContentLevelsRemaining<=0)
+                    {
+                        continue;
+                    }
                     //TODO: Loop through and make array
                     var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
-                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent())).ToList());
+                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1)).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
@@ -394,6 +398,8 @@ namespace ServiceAPIExtensions.Controllers
             return StatusCode(HttpStatusCode.NoContent);
         }
 
+        const int GetChildrenRecurseContentLevel = 1;
+
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
         {
@@ -408,7 +414,7 @@ namespace ServiceAPIExtensions.Controllers
             var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x)));
+            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
 
             if (parentContent is PageData)
             {
@@ -416,7 +422,7 @@ namespace ServiceAPIExtensions.Controllers
                     parentContent.Property
                     .Where(p => p.Value != null && p.Value is ContentArea)
                     .Select(p=>p.Value as ContentArea)
-                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink)))));
+                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
             }
 
             return Ok(children.ToArray());
@@ -433,7 +439,7 @@ namespace ServiceAPIExtensions.Controllers
             {
                 var content = _repo.Get<IContent>(contentReference);
                 if (content.IsDeleted) return NotFound();
-                return Ok(MapContent(content));
+                return Ok(MapContent(content,recurseContentLevelsRemaining:1));
             }
             catch(ContentNotFoundException)
             {
