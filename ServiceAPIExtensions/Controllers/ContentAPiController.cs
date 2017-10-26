@@ -21,6 +21,7 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
+using System.Transactions;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -223,27 +224,50 @@ namespace ServiceAPIExtensions.Controllers
             var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
-            if (moveToPath != null)
-            {
-                try
-                {
-                    var moveTo = FindContentReference(moveToPath.Substring(1));
-                    _repo.Move(contentRef, moveTo);
-                }
-                catch (ContentNotFoundException)
-                {
-                    return BadRequest("target page not found");
-                }
-            }
-            // Save the reference and publish if requested.
             try
             {
-                var updatedReference = _repo.Save(content, saveaction);
-                return Ok(new { reference = updatedReference.ToString() });
+                return RunInTransaction<IHttpActionResult>(ts =>
+                {
+                    if (moveToPath != null)
+                    {
+                        try
+                        {
+                            var moveTo = FindContentReference(moveToPath.Substring(1));
+                            _repo.Move(contentRef, moveTo);
+                        }
+                        catch (ContentNotFoundException)
+                        {
+                            return BadRequest("target page not found");
+                        }
+                    }
+
+                    try
+                    {
+                        var updatedReference = _repo.Save(content, saveaction);
+                        ts.Complete();
+                        return Ok(new { reference = updatedReference.ToString() });
+
+                    }
+                    catch (ValidationException ex)
+                    {
+                        return BadRequest(ex.Message);
+                    }
+                });
             }
-            catch(ValidationException ex)
+            finally
             {
-                return BadRequest(ex.Message);
+                //remove from cache since transactions don't play nice with the caching mechanism
+                ServiceLocator.Current.GetInstance<IContentCacheRemover>().Remove(contentRef);
+            }
+        }
+
+        T RunInTransaction<T>(Func<TransactionScope,T> code)
+        {
+            using(var ts = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions {  IsolationLevel = IsolationLevel.ReadCommitted}))
+            {
+                var ret= code(ts);
+
+                return ret;
             }
         }
 
