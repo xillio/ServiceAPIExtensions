@@ -412,15 +412,11 @@ namespace ServiceAPIExtensions.Controllers
 
             if (parentContent is PageData)
             {
-                // Collect Main Content
-                var main = (parentContent.Property.Get("MainContentArea")?.Value as ContentArea);
-                if (main != null)
-                    children.AddRange(main.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
-                
-                // Collect Related Content
-                var related = (parentContent.Property.Get("RelatedContentArea")?.Value as ContentArea);
-                if (related != null)
-                    children.AddRange(related.Items.Select(x => MapContent(_repo.Get<IContent>(x.ContentLink))));
+                children.AddRange(
+                    parentContent.Property
+                    .Where(p => p.Value != null && p.Value is ContentArea)
+                    .Select(p=>p.Value as ContentArea)
+                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink)))));
             }
 
             return Ok(children.ToArray());
