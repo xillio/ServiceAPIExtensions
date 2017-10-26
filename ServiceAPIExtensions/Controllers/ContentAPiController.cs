@@ -272,14 +272,7 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequest("Name is a required field");
             }
             contentProperties.Remove("Name");
-
-            var pageName = (string)nameValue;
-
-            if (_repo.GetChildren<IContent>(parentContentRef).Any(ch => ch.Name == pageName))
-            {
-                return BadRequest($"Content with name '{pageName}' already exists");
-            }
-
+            
             EPiServer.DataAccess.SaveAction saveaction = action;
             if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
             {
@@ -290,7 +283,7 @@ namespace ServiceAPIExtensions.Controllers
             // Create content.
             IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
 
-            content.Name = pageName;
+            content.Name = (string)nameValue;
 
             // Set all the other values.
             var error = UpdateContentProperties(contentProperties, content);
