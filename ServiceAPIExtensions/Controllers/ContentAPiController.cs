@@ -2,10 +2,7 @@
 using EPiServer.Core;
 using EPiServer.Core.Transfer;
 using EPiServer.DataAbstraction;
-using EPiServer.ServiceApi.Models;
 using EPiServer.ServiceLocation;
-using EPiServer.SpecializedProperties;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
@@ -18,10 +15,8 @@ using System.Web.Http.Results;
 using EPiServer.ServiceApi.Configuration;
 using EPiServer.Framework.Blobs;
 using System.IO;
-using EPiServer.Web.Routing;
 using EPiServer.Data.Entity;
 using EPiServer.Web.Internal;
-using System.Reflection;
 using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
@@ -29,148 +24,134 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ServiceAPIExtensions.Controllers
 {
-    [/*AuthorizePermission("EPiServerServiceApi", "WriteAccess"),*/ RequireHttps, RoutePrefix("episerverapi/content")]
+    [RequireHttps, RoutePrefix("episerverapi/content")]
     public class ContentAPiController : ApiController
     {
-        protected IContentRepository _repo = ServiceLocator.Current.GetInstance<IContentRepository>();
-        protected IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
-        protected IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
-        protected BlobFactory _blobfactory = ServiceLocator.Current.GetInstance<BlobFactory>();
-        
+        IContentRepository _repo = ServiceLocator.Current.GetInstance<IContentRepository>();
+        IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
+        IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
+        IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
+
+        readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
+        {
+            { "", ContentReference.RootPage },
+            { "root" , ContentReference.RootPage },
+            { "start" , ContentReference.StartPage },
+            { "globalblock" , ContentReference.GlobalBlockFolder },
+            { "siteblock" , ContentReference.SiteBlockFolder }
+        };
+
         /// <summary>
         /// Finds the content with the given name
         /// </summary>
-        /// <param name="Ref">The name of the content</param>
+        /// <param name="reference">The name of the content</param>
         /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        protected ContentReference LookupRef(string Ref)
+        ContentReference FindContentReference(string reference)
         {
-            if (Ref == "") return ContentReference.RootPage;
-            if (Ref.ToLower() == "root") return ContentReference.RootPage;
-            if (Ref.ToLower() == "start") return ContentReference.StartPage;
-            if (Ref.ToLower() == "globalblock") return ContentReference.GlobalBlockFolder;
-            if (Ref.ToLower() == "siteblock") return ContentReference.SiteBlockFolder;
-            
-            if (ContentReference.TryParse(Ref, out ContentReference c)) return c;
+            if(constantContentReferenceMap.ContainsKey(reference.ToLower()))
+            {
+                return constantContentReferenceMap[reference.ToLower()];
+            }
 
-            Guid g=Guid.Empty;
-            if (Guid.TryParse(Ref, out g)) EPiServer.Web.PermanentLinkUtility.FindContentReference(g);
+            if (ContentReference.TryParse(reference, out ContentReference parsedReference))
+            {
+                return parsedReference;
+            }
+
+            if (Guid.TryParse(reference, out Guid parsedGuid))
+            {
+                return EPiServer.Web.PermanentLinkUtility.FindContentReference(parsedGuid);
+            }
             return ContentReference.EmptyReference;
         }
 
-        /// <summary>
-        /// Finds the content with a given name of its parent. Favours URLEncoded name over actual name.
-        /// </summary>
-        /// <param name="Parent">The reference to the parent</param>
-        /// <param name="Name">The name of the content</param>
-        /// <returns>The requested content on success or ContentReference.EmptyReference otherwise</returns>
-        protected ContentReference LookupRef(ContentReference Parent, string Name)
+        static Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining)
         {
-            if (Parent.Equals(ContentReference.EmptyReference))
+            if (content == null)
             {
-                return ContentReference.EmptyReference;
+                return null;
             }
+            var result = new Dictionary<string, object>();
 
-            var content = (new UrlSegment(_repo)).GetContentBySegment(Parent, Name);
-            if (content != null && !content.Equals(ContentReference.EmptyReference))
-            {
-                return content;
-            }
-            
-            var temp = _repo.GetChildren<IContent>(Parent).Where(ch => SegmentedName(ch.Name) == Name).FirstOrDefault();
-            if (temp != null)
-            {
-                return temp.ContentLink;
-            }
+            result["Name"] = content.Name;
+            result["ParentLink"] = content.ParentLink;
+            result["ContentGuid"] = content.ContentGuid;
+            result["ContentLink"] = content.ContentLink;
+            result["ContentTypeID"] = content.ContentTypeID;
+            result["__EpiserverContentType"] = GetContentType(content);
 
-            return ContentReference.EmptyReference;
-        }
-        
-        public static ExpandoObject ConstructExpandoObject(IContent c, string Select=null)
-        {
-            return ConstructExpandoObject(c,true, Select);
-        }
+            var binaryContent = content as IBinaryStorable;
 
-        public static ExpandoObject ConstructExpandoObject(IContent c, bool IncludeBinary,string Select=null)
-        {
-            dynamic e = new ExpandoObject();
-            var dic=e as IDictionary<string,object>;
-
-            if (c == null) return null;
-
-            e.Name = c.Name;
-            e.ParentLink = c.ParentLink;
-            e.ContentGuid = c.ContentGuid;
-            e.ContentLink = c.ContentLink;
-            e.ContentTypeID = c.ContentTypeID;
-            e.__EpiserverContentType = GetContentType(c);
-            //TODO: Resolve Content Type
-            var parts = (Select == null) ? null : Select.Split(',');
-
-            var content = c as IBinaryStorable;
-
-            if (content!=null)
+            if (binaryContent != null)
             {
                 // IF the content has binarydata, get the Hash and size.
 
-                if (content.BinaryData != null)
+                if (binaryContent.BinaryData != null)
                 {
-                    using (Stream stream = content.BinaryData.OpenRead())
+                    using (Stream stream = binaryContent.BinaryData.OpenRead())
                     {
-                        dic.Add("MD5", Hash(stream, MD5.Create()));
-                        dic.Add("SHA1", Hash(stream, SHA1.Create()));
-                        dic.Add("SHA256", Hash(stream, SHA256.Create()));
-                        dic.Add("FileSize", stream.Length);
+                        result.Add("MD5", Hash(stream, MD5.Create()));
+                        result.Add("SHA1", Hash(stream, SHA1.Create()));
+                        result.Add("SHA256", Hash(stream, SHA256.Create()));
+                        result.Add("FileSize", stream.Length);
                     }
                 }
                 else
                 {
-                    dic.Add("FileSize", 0);
+                    result.Add("FileSize", 0);
                 }
 
-                if (c is MediaData)
-                    dic.Add("MimeType", (c as MediaData).MimeType);
+                if (content is MediaData)
+                {
+                    result.Add("MimeType", (content as MediaData).MimeType);
+                }
+            }
+
+            foreach(var property in MapProperties(content.Property, recurseContentLevelsRemaining))
+            {
+                result.Add(property.Key, property.Value);
             }
             
-            foreach (var pi in c.Property)
+            return result;
+        }
+
+        private static Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining)
+        {
+            var result = new Dictionary<string, object>();
+            foreach (var pi in properties.Where(p => p.Value != null))
             {
-                if (parts != null && (!parts.Contains(pi.Name))) continue;
-
-                if (pi.Value != null)
+                if (pi.Type == PropertyDataType.Block)
                 {
-                    if (pi.Type == PropertyDataType.Block)
+                    var contentData = pi.Value as IContentData;
+                    if (contentData!=null)
                     {
-                        //TODO: Doesn't work. Check SiteLogoType on start page
-                        if(pi.Value is IContent)  dic.Add(pi.Name, ConstructExpandoObject((IContent)pi.Value));
-                    }
-                    else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
-                    {
-                        //TODO: Loop through and make array
-                        var pca = pi as EPiServer.SpecializedProperties.PropertyContentArea;
-                        ContentArea ca = pca.Value as ContentArea;
-                        List<ExpandoObject> lst=new List<ExpandoObject>();
-                        foreach(var itm in ca.Items){
-                            dynamic itmobj = ConstructExpandoObject(itm.GetContent());
-                            lst.Add(itmobj);
-                        }
-                        dic.Add(pi.Name, lst.ToArray());
-
-                    } 
-                    else if (pi.Value is string[])
-                    {
-                        dic.Add(pi.Name, (pi.Value as string[]));
-                    }
-                    else if (pi.Value is Int32  || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double)
-                    {
-                        dic.Add(pi.Name, pi.Value);
-                    }
-                    else { 
-                        //TODO: Handle different return values
-                        dic.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
+                        result.Add(pi.Name, MapProperties(contentData.Property, recurseContentLevelsRemaining-1));
                     }
                 }
-                    
+                else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
+                {
+                    if(recurseContentLevelsRemaining<=0)
+                    {
+                        continue;
+                    }
+                    //TODO: Loop through and make array
+                    var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
+                    ContentArea contentArea = propertyContentArea.Value as ContentArea;
+
+                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1)).ToList());
+                }
+                else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
+                {
+                    result.Add(pi.Name, pi.Value);
+                }
+                else
+                {
+                    //TODO: Handle different return values
+                    result.Add(pi.Name, (pi.Value != null) ? pi.ToWebString() : null);
+                }
             }
-            return e;
+
+            return result;
         }
 
         private static string GetContentType(IContent c)
@@ -198,145 +179,182 @@ namespace ServiceAPIExtensions.Controllers
             return $"Unknown (ContentTypeID={c.ContentTypeID})";
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*Path}")]
-        public virtual IHttpActionResult UpdateContent(string Path, [FromBody] Dictionary<string,object> Updated, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*path}")]
+        public virtual IHttpActionResult UpdateContent(string path, [FromBody] Dictionary<string,object> newProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
-            if (r == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
+            path = path ?? "";
+            var contentRef = FindContentReference(path);
+            if (contentRef == ContentReference.EmptyReference) return NotFound();
+            if (contentRef == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
 
-            if(!_repo.TryGet(r, out IContent content))
+            if(!_repo.TryGet(contentRef, out IContent originalContent))
             {
                 return NotFound();
             }
 
-            content = (content as IReadOnly).CreateWritableClone() as IContent;
-            var dic = Updated as IDictionary<string, object>;
+            var content = (originalContent as IReadOnly).CreateWritableClone() as IContent;
+            
             EPiServer.DataAccess.SaveAction saveaction = action;
-            if (dic.ContainsKey("SaveAction") && ((string)dic["SaveAction"]) == "Publish")
+            if (newProperties.ContainsKey("SaveAction") && ((string)newProperties["SaveAction"]) == "Publish")
             {
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
-                dic.Remove("SaveAction");
+                newProperties.Remove("SaveAction");
             }
 
-            if(dic.ContainsKey("__EpiserverMoveEntityTo"))
+            if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
             {
                 try
                 {
-                    var moveTo = FindContentReference((string)dic["__EpiserverMoveEntityTo"]);
-                    _repo.Move(r, moveTo);
+                    var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+
+                    if(!moveToPath.StartsWith("/"))
+                    {
+                        return BadRequest("__EpiserverMoveEntityTo should start with a /");
+                    }
+
+                    var moveTo = FindContentReference(moveToPath.Substring(1));
+                    _repo.Move(contentRef, moveTo);
                 }
                 catch(ContentNotFoundException)
                 {
                     return BadRequest("target page not found");
                 }
-                dic.Remove("__EpiserverMoveEntityTo");
+                newProperties.Remove("__EpiserverMoveEntityTo");
             }
 
-            if(dic.ContainsKey("Name"))
+            if(newProperties.ContainsKey("Name"))
             {
-                content.Name = dic["Name"].ToString();
-                dic.Remove("Name");
+                content.Name = newProperties["Name"].ToString();
+                newProperties.Remove("Name");
             }
             
             // Store the new information in the object.
-            UpdateContentWithProperties(dic, content, out string error);
+            var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference and publish if requested.
-            var rt = _repo.Save(content, saveaction);
-            return Ok(new { reference = rt.ToString() });
+            var updatedReference = _repo.Save(content, saveaction);
+            return Ok(new { reference = updatedReference.ToString() });
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*Path}")]
-        public virtual IHttpActionResult CreateContent(string Path, [FromBody] ExpandoObject content, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
+        public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            path = path ?? "";
+            var parentContentRef = FindContentReference(path);
+            if (parentContentRef == ContentReference.EmptyReference) return NotFound();
+            if(!ReferenceExists(parentContentRef))
+            {
+                return NotFound();
+            }
 
             // Instantiate content of named type.
-            var properties = content as IDictionary<string, object>;
-            if (properties == null || !properties.TryGetValue("ContentType", out object ContentType))
+            if (contentProperties == null)
+            {
+                return BadRequest("No properties specified");
+            }
+
+            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString) || !(contentTypeString is string))
+            {
                 return BadRequest("'ContentType' is a required field.");
+            }
 
             // Check ContentType.
-            var ctype = _typerepo.Load((string)ContentType);
-            if (ctype == null && int.TryParse((string)ContentType, out int j)) ctype = _typerepo.Load(j);
-            if (ctype == null) return BadRequest($"'{ContentType}' is an invalid ContentType");
-
-            // Remove 'ContentType' from properties before iterating properties.
-            properties.Remove("ContentType");
-
-            // Check if the object already exists.
-            if (properties.TryGetValue("Name", out object name))
+            ContentType contentType = FindEpiserverContentType(contentTypeString);
+            if (contentType == null)
             {
-                var temp = _repo.GetChildren<IContent>(r).Where(ch => ch.Name == (string)name).FirstOrDefault();
-                if (temp != null) return BadRequest($"Content with name '{name}' already exists");
+                return BadRequest($"'{contentTypeString}' is an invalid ContentType");
+            }
+            contentProperties.Remove("ContentType");
+
+            if (!contentProperties.TryGetValue("Name", out object nameValue) || !(nameValue is string))
+            {
+                return BadRequest("Name is a required field");
+            }
+            contentProperties.Remove("Name");
+            
+            EPiServer.DataAccess.SaveAction saveaction = action;
+            if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
+            {
+                saveaction = EPiServer.DataAccess.SaveAction.Publish;
+                contentProperties.Remove("SaveAction");
             }
             
             // Create content.
-            IContent con = _repo.GetDefault<IContent>(r, ctype.ID);
+            IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
 
-            EPiServer.DataAccess.SaveAction saveaction = action;
-            if (properties.ContainsKey("SaveAction") && (string)properties["SaveAction"] == "Publish")
-            {
-                saveaction = EPiServer.DataAccess.SaveAction.Publish;
-                properties.Remove("SaveAction");
-            }
-
-            // Set the reference name.
-            string _name = "";
-            if (properties.ContainsKey("Name"))
-            {
-                _name = properties["Name"].ToString();
-                properties.Remove("Name");
-            }
-            
-            if (!string.IsNullOrEmpty(_name)) con.Name = _name;
+            content.Name = (string)nameValue;
 
             // Set all the other values.
-            UpdateContentWithProperties(properties, con, out string error);
+            var error = UpdateContentProperties(contentProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
             // Save the reference with the requested save action.
-            if (!string.IsNullOrEmpty(_name)) con.Name = _name;
             try
             {
-                var rt = _repo.Save(con, saveaction);
-                return Created<object>(Path, new { reference = rt.ID });
-            } catch (ValidationException ex)
+                var createdReference = _repo.Save(content, saveaction);
+                return Created(path, new { reference = createdReference.ID });
+            }
+            catch (ValidationException ex)
             {
                 return BadRequest(ex.Message);
             }
         }
-        
-        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*Path}")]
-        public virtual IHttpActionResult DeleteContent(string Path)
-        {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
-            if (r == ContentReference.RootPage && string.IsNullOrEmpty(Path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
 
-            // If its already in the wastebasket delete it, otherwise put it in the wastebasket.
-            _repo.MoveToWastebasket(r);
+        private bool ReferenceExists(ContentReference contentRef)
+        {
+            return _repo.TryGet(contentRef, out IContent cont);
+        }
+
+        private ContentType FindEpiserverContentType(object contentTypeString)
+        {
+            var contentType = _typerepo.Load((string)contentTypeString);
+
+            if(contentType!=null)
+            {
+                return contentType;
+            }
+
+            if(int.TryParse((string)contentTypeString, out int contentTypeId)) {
+                return _typerepo.Load(contentTypeId);
+            }
+            
+            return null;
+        }
+
+        [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*path}")]
+        public virtual IHttpActionResult DeleteContent(string path)
+        {
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
+            if (contentReference == ContentReference.RootPage && string.IsNullOrEmpty(path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
+
+            try
+            {
+                _repo.MoveToWastebasket(contentReference);
+            }
+            catch(ContentNotFoundException e)
+            {
+                return NotFound();
+            }
             return Ok();
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*Path}")]
-        public virtual IHttpActionResult GetBinaryContent(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*path}")]
+        public virtual IHttpActionResult GetBinaryContent(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            path = path ?? "";
+            var contentRef = FindContentReference(path);
+            if (contentRef == ContentReference.EmptyReference) return NotFound();
                 
-            var cnt = _repo.Get<IContent>(r);
+            if(!_repo.TryGet(contentRef, out IContent content)) {
+                return NotFound();
+            }
 
-            if (cnt is IBinaryStorable)
+            if (content is IBinaryStorable)
             {
-                var binary = cnt as IBinaryStorable;
+                var binary = content as IBinaryStorable;
                 if (binary.BinaryData == null) return NotFound();
 
                 // Return the binary contents as a stream.
@@ -344,8 +362,10 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     var response = new HttpResponseMessage(HttpStatusCode.OK);
                     response.Content = new ByteArrayContent(br.ReadBytes((int)br.BaseStream.Length));
-                    if (cnt as IContentMedia != null)
-                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((cnt as IContentMedia).MimeType);
+                    if (content as IContentMedia != null)
+                    {
+                        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue((content as IContentMedia).MimeType);
+                    }
                     else
                     {
                         response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -354,9 +374,9 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            if (cnt is PageData)
+            if (content is PageData)
             {
-                var page = cnt as PageData;
+                var page = content as PageData;
 
                 string url = string.Format("{0}://{1}:{2}{3}",
                         HttpContext.Current.Request.Url.Scheme,
@@ -371,47 +391,48 @@ namespace ServiceAPIExtensions.Controllers
             return StatusCode(HttpStatusCode.NoContent);
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*Path}")]
-        public virtual IHttpActionResult GetChildren(string Path)
-        {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference ||
-                !_repo.TryGet<IContent>(r, out IContent parent)) return NotFound();
+        const int GetChildrenRecurseContentLevel = 1;
 
-            List<ExpandoObject> children = new List<ExpandoObject>();
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
+        public virtual IHttpActionResult GetChildren(string path)
+        {
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
+
+            if (!_repo.TryGet(contentReference, out IContent parentContent)) {
+                return NotFound();
+            }
+
+            var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(r).Select(x => ConstructExpandoObject(x)));
+            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
 
-            if (parent is PageData)
+            if (parentContent is PageData)
             {
-                // Collect Main Content
-                var main = (parent.Property.Get("MainContentArea")?.Value as ContentArea);
-                if (main != null)
-                    children.AddRange(main.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
-                
-                // Collect Related Content
-                var related = (parent.Property.Get("RelatedContentArea")?.Value as ContentArea);
-                if (related != null)
-                    children.AddRange(related.Items.Select(x => ConstructExpandoObject(_repo.Get<IContent>(x.ContentLink))));
+                children.AddRange(
+                    parentContent.Property
+                    .Where(p => p.Value != null && p.Value is ContentArea)
+                    .Select(p=>p.Value as ContentArea)
+                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
             }
 
             return Ok(children.ToArray());
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("entity/{*Path}")]
-        public virtual IHttpActionResult GetEntity(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("entity/{*path}")]
+        public virtual IHttpActionResult GetEntity(string path)
         {
-            Path = Path ?? "";
-            var r = FindContentReference(Path);
-            if (r == ContentReference.EmptyReference) return NotFound();
+            path = path ?? "";
+            var contentReference = FindContentReference(path);
+            if (contentReference == ContentReference.EmptyReference) return NotFound();
 
             try
             {
-                var content = _repo.Get<IContent>(r);
+                var content = _repo.Get<IContent>(contentReference);
                 if (content.IsDeleted) return NotFound();
-                return Ok(ConstructExpandoObject(content));
+                return Ok(MapContent(content,recurseContentLevelsRemaining:1));
             }
             catch(ContentNotFoundException)
             {
@@ -419,33 +440,26 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{Path}")]
-        public virtual IHttpActionResult GetContentTypeByPath(string Path)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{pageId}")]
+        public virtual IHttpActionResult GetContentTypeByPageId(string pageId)
         {
-            Path = Path ?? "";
+            pageId = pageId ?? "";
 
-            var reference = FindContentReference(Path);
+            var contentRef = FindContentReference(pageId);
 
-            if(reference.Equals(ContentReference.EmptyReference))
+            if (contentRef.Equals(ContentReference.EmptyReference))
             {
                 return NotFound();
             }
 
-            if(!_repo.TryGet(reference, out IContent content))
+            if (!_repo.TryGet(contentRef, out IContent content))
             {
                 return NotFound();
             }
 
-            //var page = _repo.GetDefault<IContent>(ContentReference.RootPage, reference.ID);
-            //we don't use episerverType.PropertyDefinitions since those don't include everything (PageCreated for example)
-
-            return new JsonResult<object>(new
-            {
-                TypeName = content.GetOriginalType().Name,
-                Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
-            },
-                new JsonSerializerSettings(), Encoding.UTF8, this);
+            return EpiserverContentTypeResult(content);
         }
+
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
         public virtual IHttpActionResult GetContentType(string Type)
@@ -458,120 +472,107 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             var page = _repo.GetDefault<IContent>(ContentReference.RootPage, episerverType.ID);
-            //we don't use episerverType.PropertyDefinitions since those don't include everything (PageCreated for example)
 
-            return new JsonResult<object>(new
-                {
-                    TypeName = Type,
-                    Properties = page.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
-                },
-                new JsonSerializerSettings(), Encoding.UTF8, this);
+            return EpiserverContentTypeResult(page);
         }
-        
+
+        private IHttpActionResult EpiserverContentTypeResult(IContent content)
+        {
+            return new JsonResult<object>(
+                            new
+                            {
+                                TypeName = content.GetOriginalType().Name,
+                                Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
+                            },
+                            new JsonSerializerSettings(),
+                            Encoding.UTF8,
+                            this);
+        }
+
         private void WriteBlobToStorage(string name, byte[] data, MediaData md)
         {
-            var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, Path.GetExtension(name));
-            using (var s = blob.OpenWrite())
+            var extension = Path.GetExtension(name);
+
+            if(string.IsNullOrWhiteSpace(extension))
             {
-                BinaryWriter w = new BinaryWriter(s);
-                w.Write(data);
-                w.Flush();
+                extension = ".bin";
+            }
+
+            var blob = _blobfactory.CreateBlob(md.BinaryDataContainer, extension);
+            using (var writer = new BinaryWriter(blob.OpenWrite()))
+            {
+                writer.Write(data);
+                writer.Flush(); // this is probably not necessary because of the dispose
             }
             md.BinaryData = blob;
         }
 
-        private void UpdateContentWithProperties(IDictionary<string, object> properties, IContent con, out string error)
+        private string UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
         {
-            error = "";
-            foreach (var k in properties.Keys)
+            foreach (var propertyName in newProperties.Keys)
             {
-                UpdateFieldOnContent(properties, con, k, out error);
-                if (!string.IsNullOrEmpty(error)) return;
+                var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"],  propertyName, newProperties[propertyName]);
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    return errorMessage;
+                }
             }
+            return null;
         }
 
-        private void UpdateFieldOnContent(IDictionary<string, object> properties, IContent con, string k, out string error)
+        private string UpdateFieldOnContent(IContent con, string contentName, string propertyName, object value)
         {
-            error = "";
             //Problem: con might only contain very few properties (not inherited)
-            if (con.Property.Contains(k))
+            if (con.Property.Contains(propertyName))
             {
 
-                if (con.Property[k] is EPiServer.SpecializedProperties.PropertyContentArea)
+                if (con.Property[propertyName] is EPiServer.SpecializedProperties.PropertyContentArea)
                 {
                     //Handle if property is Content Area.
-                    if (con.Property[k].Value == null) con.Property[k].Value = new ContentArea();
-                    ContentArea ca = con.Property[k].Value as ContentArea;
-                    var lst = properties[k];
-                    if (lst is List<object>)
+                    if (con.Property[propertyName].Value == null) con.Property[propertyName].Value = new ContentArea();
+                    ContentArea ca = con.Property[propertyName].Value as ContentArea;
+                    var lst = value as List<object>;
+                    if (lst != null)
                     {
                         foreach (var s in (lst as List<object>))
                         {
-                            var itmref = LookupRef(s.ToString());
+                            var itmref = FindContentReference(s.ToString());
                             ca.Items.Add(new ContentAreaItem() { ContentLink = itmref });
                         }
                     }
                 }
-                else if (properties[k] is string[])
+                else if (value is string[])
                 {
-                    con.Property[k].Value = properties[k] as string[];
+                    con.Property[propertyName].Value = value as string[];
                 }
-                else if (con.Property[k].GetType() == typeof(EPiServer.Core.PropertyDate))
+                else if (con.Property[propertyName].GetType() == typeof(EPiServer.Core.PropertyDate))
                 {
-                    if (properties[k] is DateTime)
+                    if (value is DateTime)
                     {
-                        con.Property[k].Value = properties[k];
+                        con.Property[propertyName].Value = value;
                     }
                     else
                     {
-                        con.Property[k].ParseToSelf((string)properties[k]);
+                        con.Property[propertyName].ParseToSelf((string)value);
                     }
                 }
                 else
                 {
-                    con.Property[k].Value = properties[k];
+                    con.Property[propertyName].Value = value;
                 }
+                return null;
             }
-            else if (k.ToLower() == "binarydata" && con is MediaData)
+
+            if (propertyName.ToLower() == "binarydata" && con is MediaData)
             {
-                dynamic binitm = properties[k];
-                byte[] bytes = Convert.FromBase64String(binitm);
-                WriteBlobToStorage(con.Name ?? (string)properties["Name"], bytes, con as MediaData);
-            } else
-            {
-                error = k;
-                return;
+                byte[] bytes = Convert.FromBase64String((string)value);
+                WriteBlobToStorage(contentName, bytes, con as MediaData);
+                return null;
             }
+
+            return propertyName;
         }
-
-        /// <summary>
-        /// Transforms a name into an URLEncoded name.
-        /// </summary>
-        /// <param name="name">The origional name</param>
-        /// <returns>An URLEncoded name</returns>
-        private string SegmentedName(string name)
-        {
-            return name.Replace(' ', '-').ToLower();
-        }
-
-        private ContentReference FindContentReference(string Path)
-        {
-            if (String.IsNullOrEmpty(Path))
-            {
-                return ContentReference.RootPage;
-            }
-
-            var parts = Path.Split(new char[1] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            var r = LookupRef(parts.First());
-            foreach (var k in parts.Skip(1))
-            {
-                r = LookupRef(r, k);
-            }
-
-            return r;
-        }
-        
-
+                
         private static string Hash(Stream stream, HashAlgorithm hashing)
         {
             StringBuilder sBuilder = new StringBuilder();
