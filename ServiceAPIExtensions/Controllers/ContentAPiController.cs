@@ -265,9 +265,7 @@ namespace ServiceAPIExtensions.Controllers
         {
             using(var ts = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions {  IsolationLevel = IsolationLevel.ReadCommitted}))
             {
-                var ret= code(ts);
-
-                return ret;
+                return code(ts);
             }
         }
 
