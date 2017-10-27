@@ -21,7 +21,6 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
-using System.Transactions;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -224,50 +223,42 @@ namespace ServiceAPIExtensions.Controllers
             var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
+            var validationErrors = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>().Validate(content);
+
+            if (validationErrors.Any())
+            {
+                return BadRequest(validationErrors.First().ErrorMessage);
+            }
+
+            if (moveToPath != null)
+            {
+                try
+                {
+                    var moveTo = FindContentReference(moveToPath.Substring(1));
+                    _repo.Move(contentRef, moveTo);
+                }
+                catch (ContentNotFoundException)
+                {
+                    return BadRequest("target page not found");
+                }
+            }
+
             try
             {
-                return RunInTransaction<IHttpActionResult>(ts =>
+                var updatedReference = _repo.Save(content, saveaction);
+                
+                return Ok(new { reference = updatedReference.ToString() });
+            }
+            catch (Exception ex)
+            {
+                if(moveToPath!=null)
                 {
-                    if (moveToPath != null)
-                    {
-                        try
-                        {
-                            var moveTo = FindContentReference(moveToPath.Substring(1));
-                            _repo.Move(contentRef, moveTo);
-                        }
-                        catch (ContentNotFoundException)
-                        {
-                            return BadRequest("target page not found");
-                        }
-                    }
-
-                    try
-                    {
-                        var updatedReference = _repo.Save(content, saveaction);
-                        ts.Complete();
-                        return Ok(new { reference = updatedReference.ToString() });
-
-                    }
-                    catch (ValidationException ex)
-                    {
-                        return BadRequest(ex.Message);
-                    }
-                });
+                    //try to undo the move. We've tried using TransactionScope for this, but it doesn't play well with Episerver (caching, among other problems)
+                    _repo.Move(contentRef, originalContent.ParentLink);
+                }
+                throw;
             }
-            finally
-            {
-                //remove from cache since transactions don't play nice with the caching mechanism
-                ServiceLocator.Current.GetInstance<IContentCacheRemover>().Remove(contentRef);
-            }
-        }
-
-        T RunInTransaction<T>(Func<TransactionScope,T> code)
-        {
-            using(var ts = new TransactionScope(TransactionScopeOption.Required, new TransactionOptions {  IsolationLevel = IsolationLevel.ReadCommitted}))
-            {
-                return code(ts);
-            }
-        }
+         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
