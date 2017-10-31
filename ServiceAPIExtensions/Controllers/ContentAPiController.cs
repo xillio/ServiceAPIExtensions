@@ -427,6 +427,11 @@ namespace ServiceAPIExtensions.Controllers
                 return NotFound();
             }
 
+            if(!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+
             var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
