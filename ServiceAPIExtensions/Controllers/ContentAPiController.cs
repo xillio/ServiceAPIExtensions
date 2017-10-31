@@ -375,6 +375,11 @@ namespace ServiceAPIExtensions.Controllers
                 return NotFound();
             }
 
+            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+
             if (content is IBinaryStorable)
             {
                 var binary = content as IBinaryStorable;
