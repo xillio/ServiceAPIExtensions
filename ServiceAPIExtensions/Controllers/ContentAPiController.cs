@@ -201,23 +201,14 @@ namespace ServiceAPIExtensions.Controllers
                 newProperties.Remove("SaveAction");
             }
 
+            string moveToPath = null;
+
             if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
             {
-                try
+                moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+                if (!moveToPath.StartsWith("/"))
                 {
-                    var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
-
-                    if(!moveToPath.StartsWith("/"))
-                    {
-                        return BadRequest("__EpiserverMoveEntityTo should start with a /");
-                    }
-
-                    var moveTo = FindContentReference(moveToPath.Substring(1));
-                    _repo.Move(contentRef, moveTo);
-                }
-                catch(ContentNotFoundException)
-                {
-                    return BadRequest("target page not found");
+                    return BadRequest("__EpiserverMoveEntityTo should start with a /");
                 }
                 newProperties.Remove("__EpiserverMoveEntityTo");
             }
@@ -232,10 +223,42 @@ namespace ServiceAPIExtensions.Controllers
             var error = UpdateContentProperties(newProperties, content);
             if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
 
-            // Save the reference and publish if requested.
-            var updatedReference = _repo.Save(content, saveaction);
-            return Ok(new { reference = updatedReference.ToString() });
-        }
+            var validationErrors = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>().Validate(content);
+
+            if (validationErrors.Any())
+            {
+                return BadRequest(validationErrors.First().ErrorMessage);
+            }
+
+            if (moveToPath != null)
+            {
+                try
+                {
+                    var moveTo = FindContentReference(moveToPath.Substring(1));
+                    _repo.Move(contentRef, moveTo);
+                }
+                catch (ContentNotFoundException)
+                {
+                    return BadRequest("target page not found");
+                }
+            }
+
+            try
+            {
+                var updatedReference = _repo.Save(content, saveaction);
+                
+                return Ok(new { reference = updatedReference.ToString() });
+            }
+            catch (Exception ex)
+            {
+                if(moveToPath!=null)
+                {
+                    //try to undo the move. We've tried using TransactionScope for this, but it doesn't play well with Episerver (caching, among other problems)
+                    _repo.Move(contentRef, originalContent.ParentLink);
+                }
+                throw;
+            }
+         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
