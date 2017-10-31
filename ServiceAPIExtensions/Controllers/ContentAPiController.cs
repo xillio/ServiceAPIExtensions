@@ -65,7 +65,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
 
-        static Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining)
+        Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining)
         {
             if (content == null)
             {
@@ -79,6 +79,7 @@ namespace ServiceAPIExtensions.Controllers
             result["ContentLink"] = content.ContentLink;
             result["ContentTypeID"] = content.ContentTypeID;
             result["__EpiserverContentType"] = GetContentType(content);
+            result["__EpiserverBaseContentType"] = GetBaseContentType(content);
 
             var binaryContent = content as IBinaryStorable;
 
@@ -115,7 +116,7 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private static Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining)
+        private Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining)
         {
             var result = new Dictionary<string, object>();
             foreach (var pi in properties.Where(p => p.Value != null))
@@ -154,7 +155,18 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private static string GetContentType(IContent c)
+        private string GetContentType(IContent c)
+        {
+            if (_typerepo.Load(c.GetOriginalType().Name) != null)
+                return c.GetOriginalType().Name;
+            
+            if (_typerepo.Load("Sys" + c.GetOriginalType().Name) != null)
+                return "Sys" + c.GetOriginalType().Name;
+
+            return GetBaseContentType(c);
+        }
+
+        private string GetBaseContentType(IContent c)
         {
             if(c is MediaData)
             {
