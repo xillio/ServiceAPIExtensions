@@ -450,7 +450,7 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
-
+            
             if(!_repo.TryGet(contentReference, out IContent content))
             {
                 return NotFound();
@@ -461,7 +461,24 @@ namespace ServiceAPIExtensions.Controllers
                 return NotFound();
             }
 
+            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+            
             return Ok(MapContent(content, recurseContentLevelsRemaining: 1));
+        }
+
+        bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
+        {
+            var securable = content as EPiServer.Security.ISecurable;
+
+            if(securable==null)
+            {
+                return true;
+            }
+
+            return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{pageId}")]
