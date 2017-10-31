@@ -430,7 +430,11 @@ namespace ServiceAPIExtensions.Controllers
             var children = new List<Dictionary<string, object>>();
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
+            children.AddRange(
+                _repo
+                .GetChildren<IContent>(contentReference)
+                .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
+                .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
 
             if (parentContent is PageData)
             {
