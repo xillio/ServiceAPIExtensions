@@ -451,16 +451,17 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
 
-            try
-            {
-                var content = _repo.Get<IContent>(contentReference);
-                if (content.IsDeleted) return NotFound();
-                return Ok(MapContent(content,recurseContentLevelsRemaining:1));
-            }
-            catch(ContentNotFoundException)
+            if(!_repo.TryGet(contentReference, out IContent content))
             {
                 return NotFound();
             }
+
+            if (content.IsDeleted)
+            {
+                return NotFound();
+            }
+
+            return Ok(MapContent(content, recurseContentLevelsRemaining: 1));
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{pageId}")]
