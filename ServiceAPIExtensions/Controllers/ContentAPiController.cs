@@ -291,6 +291,42 @@ namespace ServiceAPIExtensions.Controllers
             }
          }
 
+        IHttpActionResult BadRequestErrorCode(string errorCode)
+        {
+            return Content(HttpStatusCode.BadRequest, new { errorCode });
+        }
+
+
+        class ValidationError
+        {
+            public string errorCode { get; set; }
+            public string errorMsg { get; set; }
+            public string name { get; set; }
+
+            public static ValidationError Required(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_REQUIRED", errorMsg = "Field is required" };
+            }
+
+            public static ValidationError InvalidType(string fieldName, Type type)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
+            }
+
+            public static ValidationError CustomError(string fieldName, string errorCode, string msg)
+            {
+                return new ValidationError { name = fieldName, errorCode = errorCode, errorMsg = msg };
+            }
+        }
+
+        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
+        {
+            return Content(HttpStatusCode.BadRequest, new {
+                errorCode = "FIELD_VALIDATION_ERROR",
+                validationErrors = errors.GroupBy(x=>x.name).ToDictionary(x=>x.Key, x=>x.ToList())
+            });
+        }
+
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
@@ -305,19 +341,24 @@ namespace ServiceAPIExtensions.Controllers
             // Instantiate content of named type.
             if (contentProperties == null)
             {
-                return BadRequest("No properties specified");
+                return BadRequestErrorCode("BODY_EMPTY");
             }
 
-            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString) || !(contentTypeString is string))
+            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString))
             {
-                return BadRequest("'ContentType' is a required field.");
+                return BadRequestValidationErrors(ValidationError.Required("ContentType"));
+            }
+
+            if(!(contentTypeString is string))
+            {
+                return BadRequestValidationErrors(ValidationError.InvalidType("ContentType", typeof(string)));
             }
 
             // Check ContentType.
             ContentType contentType = FindEpiserverContentType(contentTypeString);
             if (contentType == null)
             {
-                return BadRequest($"'{contentTypeString}' is an invalid ContentType");
+                return BadRequestValidationErrors(ValidationError.CustomError("ContentType", "CONTENT_TYPE_INVALID", $"Could not find contentType {contentTypeString}"));
             }
             contentProperties.Remove("ContentType");
 
