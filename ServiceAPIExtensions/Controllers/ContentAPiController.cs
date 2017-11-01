@@ -21,6 +21,7 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
+using EPiServer.Validation;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -31,6 +32,7 @@ namespace ServiceAPIExtensions.Controllers
         IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
         IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
         IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
+        EPiServer.Validation.IValidationService _validationService = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>();
 
         readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
         {
@@ -232,7 +234,7 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequestValidationErrors(errors.ToArray());
             }
 
-            var validationErrors = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>().Validate(content);
+            var validationErrors = _validationService.Validate(content);
 
             if (validationErrors.Any())
             {
@@ -370,7 +372,16 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(errors.ToArray());
             }
-            
+
+
+
+            var validationErrors = _validationService.Validate(content);
+
+            if(validationErrors.Any())
+            {
+                return BadRequestValidationErrors(validationErrors.Select(ValidationError.FromEpiserver).ToArray());
+            }
+
             // Save the reference with the requested save action.
             try
             {
@@ -380,10 +391,6 @@ namespace ServiceAPIExtensions.Controllers
             catch(AccessDeniedException)
             {
                 return StatusCode(HttpStatusCode.Forbidden);
-            }
-            catch (ValidationException ex)
-            {
-                return BadRequest(ex.Message);
             }
         }
 
@@ -487,7 +494,7 @@ namespace ServiceAPIExtensions.Controllers
         }
 
         const int GetChildrenRecurseContentLevel = 1;
-
+        
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
         {
@@ -751,6 +758,15 @@ namespace ServiceAPIExtensions.Controllers
             public static ValidationError FieldNotKnown(string fieldName)
             {
                 return new ValidationError { name = fieldName, errorCode = "FIELD_NOT_KNOWN", errorMsg = $"Field '{fieldName}' is not known"};
+            }
+
+            public static ValidationError FromEpiserver(EPiServer.Validation.ValidationError epiValidation)
+            {
+                if(epiValidation.Source is EPiServer.Validation.Internal.RequiredPropertyValidator)
+                {
+                    return Required(epiValidation.PropertyName);
+                }
+                return new ValidationError { name = epiValidation.PropertyName, errorCode = "FIELD_EPISERVER_VALIDATION_ERROR", errorMsg = epiValidation.ErrorMessage };
             }
         }
     }
