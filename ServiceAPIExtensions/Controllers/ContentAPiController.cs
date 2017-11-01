@@ -194,6 +194,11 @@ namespace ServiceAPIExtensions.Controllers
                 return NotFound();
             }
 
+            if(newProperties==null)
+            {
+                return BadRequestErrorCode("BODY_EMPTY");
+            }
+
             var content = (originalContent as IReadOnly).CreateWritableClone() as IContent;
             
             EPiServer.DataAccess.SaveAction saveaction = action;
@@ -238,7 +243,7 @@ namespace ServiceAPIExtensions.Controllers
 
             if (validationErrors.Any())
             {
-                return BadRequest(validationErrors.First().ErrorMessage);
+                return BadRequestValidationErrors(validationErrors.Select(ValidationError.FromEpiserver).ToArray());
             }
 
             if(!HasAccess(content,EPiServer.Security.AccessLevel.Edit | EPiServer.Security.AccessLevel.Publish))
@@ -372,9 +377,7 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(errors.ToArray());
             }
-
-
-
+            
             var validationErrors = _validationService.Validate(content);
 
             if(validationErrors.Any())
@@ -654,6 +657,11 @@ namespace ServiceAPIExtensions.Controllers
                     }
                 }
                 catch (InvalidCastException e)
+                {
+                    result.Add(ValidationError.InvalidType(propertyName));
+                }
+                
+                catch(FormatException)
                 {
                     result.Add(ValidationError.InvalidType(propertyName));
                 }
