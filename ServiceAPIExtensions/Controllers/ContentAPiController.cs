@@ -226,8 +226,11 @@ namespace ServiceAPIExtensions.Controllers
             }
             
             // Store the new information in the object.
-            var error = UpdateContentProperties(newProperties, content);
-            if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
+            var errors = UpdateContentProperties(newProperties, content);
+            if(errors.Any())
+            {
+                return BadRequestValidationErrors(errors.ToArray());
+            }
 
             var validationErrors = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>().Validate(content);
 
@@ -295,30 +298,7 @@ namespace ServiceAPIExtensions.Controllers
         {
             return Content(HttpStatusCode.BadRequest, new { errorCode });
         }
-
-
-        class ValidationError
-        {
-            public string errorCode { get; set; }
-            public string errorMsg { get; set; }
-            public string name { get; set; }
-
-            public static ValidationError Required(string fieldName)
-            {
-                return new ValidationError { name = fieldName, errorCode = "FIELD_REQUIRED", errorMsg = "Field is required" };
-            }
-
-            public static ValidationError InvalidType(string fieldName, Type type)
-            {
-                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
-            }
-
-            public static ValidationError CustomError(string fieldName, string errorCode, string msg)
-            {
-                return new ValidationError { name = fieldName, errorCode = errorCode, errorMsg = msg };
-            }
-        }
-
+        
         IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
         {
             return Content(HttpStatusCode.BadRequest, new {
@@ -348,8 +328,9 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(ValidationError.Required("ContentType"));
             }
+            contentProperties.Remove("ContentType");
 
-            if(!(contentTypeString is string))
+            if (!(contentTypeString is string))
             {
                 return BadRequestValidationErrors(ValidationError.InvalidType("ContentType", typeof(string)));
             }
@@ -360,13 +341,16 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(ValidationError.CustomError("ContentType", "CONTENT_TYPE_INVALID", $"Could not find contentType {contentTypeString}"));
             }
-            contentProperties.Remove("ContentType");
-
-            if (!contentProperties.TryGetValue("Name", out object nameValue) || !(nameValue is string))
+            
+            if (!contentProperties.TryGetValue("Name", out object nameValue))
             {
-                return BadRequest("Name is a required field");
+                return BadRequestValidationErrors(ValidationError.Required("Name"));
             }
             contentProperties.Remove("Name");
+
+            if(!(nameValue is string)) {
+                return BadRequestValidationErrors(ValidationError.InvalidType("Name", typeof(string)));
+            }
             
             EPiServer.DataAccess.SaveAction saveaction = action;
             if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
@@ -381,9 +365,12 @@ namespace ServiceAPIExtensions.Controllers
             content.Name = (string)nameValue;
 
             // Set all the other values.
-            var error = UpdateContentProperties(contentProperties, content);
-            if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
-
+            var errors = UpdateContentProperties(contentProperties, content);
+            if (errors.Any())
+            {
+                return BadRequestValidationErrors(errors.ToArray());
+            }
+            
             // Save the reference with the requested save action.
             try
             {
@@ -645,17 +632,19 @@ namespace ServiceAPIExtensions.Controllers
             md.BinaryData = blob;
         }
 
-        private string UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
+        private List<ValidationError> UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
         {
+            var result = new List<ValidationError>();
+
             foreach (var propertyName in newProperties.Keys)
             {
                 var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"],  propertyName, newProperties[propertyName]);
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
-                    return errorMessage;
+                    result.Add(ValidationError.UnknownField(propertyName));
                 }
             }
-            return null;
+            return result;
         }
 
         private string UpdateFieldOnContent(IContent con, string contentName, string propertyName, object value)
@@ -723,6 +712,35 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             return sBuilder.ToString();
+        }
+
+
+
+        class ValidationError
+        {
+            public string errorCode { get; set; }
+            public string errorMsg { get; set; }
+            public string name { get; set; }
+
+            public static ValidationError Required(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_REQUIRED", errorMsg = "Field is required" };
+            }
+
+            public static ValidationError InvalidType(string fieldName, Type type)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
+            }
+
+            public static ValidationError CustomError(string fieldName, string errorCode, string msg)
+            {
+                return new ValidationError { name = fieldName, errorCode = errorCode, errorMsg = msg };
+            }
+
+            public static ValidationError UnknownField(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_UNKNOWN", errorMsg = $"Field '{fieldName}' is not known"};
+                }
         }
     }
 }
