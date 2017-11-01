@@ -638,10 +638,17 @@ namespace ServiceAPIExtensions.Controllers
 
             foreach (var propertyName in newProperties.Keys)
             {
-                var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"],  propertyName, newProperties[propertyName]);
-                if (!string.IsNullOrEmpty(errorMessage))
+                try
                 {
-                    result.Add(ValidationError.UnknownField(propertyName));
+                    var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"], propertyName, newProperties[propertyName]);
+                    if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        result.Add(ValidationError.FieldNotKnown(propertyName));
+                    }
+                }
+                catch (InvalidCastException e)
+                {
+                    result.Add(ValidationError.InvalidType(propertyName));
                 }
             }
             return result;
@@ -727,6 +734,10 @@ namespace ServiceAPIExtensions.Controllers
                 return new ValidationError { name = fieldName, errorCode = "FIELD_REQUIRED", errorMsg = "Field is required" };
             }
 
+            public static ValidationError InvalidType(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type" };
+            }
             public static ValidationError InvalidType(string fieldName, Type type)
             {
                 return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
@@ -737,10 +748,10 @@ namespace ServiceAPIExtensions.Controllers
                 return new ValidationError { name = fieldName, errorCode = errorCode, errorMsg = msg };
             }
 
-            public static ValidationError UnknownField(string fieldName)
+            public static ValidationError FieldNotKnown(string fieldName)
             {
-                return new ValidationError { name = fieldName, errorCode = "FIELD_UNKNOWN", errorMsg = $"Field '{fieldName}' is not known"};
-                }
+                return new ValidationError { name = fieldName, errorCode = "FIELD_NOT_KNOWN", errorMsg = $"Field '{fieldName}' is not known"};
+            }
         }
     }
 }
