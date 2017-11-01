@@ -247,6 +247,7 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     return StatusCode(HttpStatusCode.Forbidden);
                 }
+
                 if (!HasAccess(moveTo, EPiServer.Security.AccessLevel.Create | EPiServer.Security.AccessLevel.Publish))
                 {
                     return StatusCode(HttpStatusCode.Forbidden);
@@ -259,12 +260,17 @@ namespace ServiceAPIExtensions.Controllers
             {
                 try
                 {
-                    
                     _repo.Move(contentRef, moveTo.ContentLink);
                 }
                 catch (ContentNotFoundException)
                 {
+                    //even though we already check for this above, we still handle it here for cases that we might not have foreseen
                     return BadRequest("target page not found");
+                }
+                catch (AccessDeniedException)
+                {
+                    //even though we already check for this above, we still handle it here for cases that we might not have foreseen
+                    return StatusCode(HttpStatusCode.Forbidden);
                 }
             }
 
