@@ -230,6 +230,11 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequest(validationErrors.First().ErrorMessage);
             }
 
+            if(!HasAccess(content,EPiServer.Security.AccessLevel.Edit | EPiServer.Security.AccessLevel.Publish))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+
             if (moveToPath != null)
             {
                 try
