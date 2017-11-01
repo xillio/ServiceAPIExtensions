@@ -201,15 +201,21 @@ namespace ServiceAPIExtensions.Controllers
                 newProperties.Remove("SaveAction");
             }
 
-            string moveToPath = null;
+            IContent moveTo = null;
 
             if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
             {
-                moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+                var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
                 if (!moveToPath.StartsWith("/"))
                 {
                     return BadRequest("__EpiserverMoveEntityTo should start with a /");
                 }
+
+                if(!_repo.TryGet(FindContentReference(moveToPath.Substring(1)), out moveTo))
+                {
+                    return BadRequest("target not found");
+                }
+                
                 newProperties.Remove("__EpiserverMoveEntityTo");
             }
 
@@ -234,13 +240,27 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return StatusCode(HttpStatusCode.Forbidden);
             }
+            
+            if(moveTo!=null)
+            {
+                if(!HasAccess(content, EPiServer.Security.AccessLevel.Read | EPiServer.Security.AccessLevel.Delete))
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
+                if (!HasAccess(moveTo, EPiServer.Security.AccessLevel.Create | EPiServer.Security.AccessLevel.Publish))
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
+            }
 
-            if (moveToPath != null)
+            //from here on we're going to try to save things to the database, we have tried to optimize the chance of succeeding above
+
+            if (moveTo != null)
             {
                 try
                 {
-                    var moveTo = FindContentReference(moveToPath.Substring(1));
-                    _repo.Move(contentRef, moveTo);
+                    
+                    _repo.Move(contentRef, moveTo.ContentLink);
                 }
                 catch (ContentNotFoundException)
                 {
@@ -256,7 +276,7 @@ namespace ServiceAPIExtensions.Controllers
             }
             catch (Exception ex)
             {
-                if(moveToPath!=null)
+                if(moveTo!=null)
                 {
                     //try to undo the move. We've tried using TransactionScope for this, but it doesn't play well with Episerver (caching, among other problems)
                     _repo.Move(contentRef, originalContent.ParentLink);
