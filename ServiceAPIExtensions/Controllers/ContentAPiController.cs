@@ -391,12 +391,16 @@ namespace ServiceAPIExtensions.Controllers
             try
             {
                 _repo.MoveToWastebasket(contentReference);
+                return Ok();
             }
             catch(ContentNotFoundException e)
             {
                 return NotFound();
             }
-            return Ok();
+            catch(AccessDeniedException)
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*path}")]
