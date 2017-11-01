@@ -452,7 +452,10 @@ namespace ServiceAPIExtensions.Controllers
                     parentContent.Property
                     .Where(p => p.Value != null && p.Value is ContentArea)
                     .Select(p=>p.Value as ContentArea)
-                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
+                    .SelectMany(ca => ca.Items
+                        .Select(item => _repo.Get<IContent>(item.ContentLink))
+                        .Where(item=>HasAccess(item,EPiServer.Security.AccessLevel.Read))
+                        .Select(item=> MapContent(item, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
             }
 
             return Ok(children.ToArray());
