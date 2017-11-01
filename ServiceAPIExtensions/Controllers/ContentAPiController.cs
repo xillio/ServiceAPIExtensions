@@ -318,6 +318,10 @@ namespace ServiceAPIExtensions.Controllers
                 var createdReference = _repo.Save(content, saveaction);
                 return Created(path, new { reference = createdReference.ID });
             }
+            catch(AccessDeniedException)
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
             catch (ValidationException ex)
             {
                 return BadRequest(ex.Message);
