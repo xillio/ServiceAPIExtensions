@@ -181,13 +181,15 @@ namespace ServiceAPIExtensions.Controllers
             return $"Unknown (ContentTypeID={c.ContentTypeID})";
         }
 
+        const string MoveEntityToPropertyKey = "__EpiserverMoveEntityTo";
+
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*path}")]
         public virtual IHttpActionResult UpdateContent(string path, [FromBody] Dictionary<string,object> newProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
             path = path ?? "";
             var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
-            if (contentRef == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
+            if (contentRef == ContentReference.RootPage) return BadRequestErrorCode("UPDATE_ROOT_NOT_ALLOWED");
 
             if(!_repo.TryGet(contentRef, out IContent originalContent))
             {
@@ -210,20 +212,25 @@ namespace ServiceAPIExtensions.Controllers
 
             IContent moveTo = null;
 
-            if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
+            if(newProperties.ContainsKey(MoveEntityToPropertyKey))
             {
-                var moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+                if(!(newProperties[MoveEntityToPropertyKey] is string))
+                {
+                    return BadRequestValidationErrors(ValidationError.InvalidType(MoveEntityToPropertyKey, typeof(string)));
+                }
+
+                var moveToPath = (string)newProperties[MoveEntityToPropertyKey];
                 if (!moveToPath.StartsWith("/"))
                 {
-                    return BadRequest("__EpiserverMoveEntityTo should start with a /");
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "FIELD_INVALID_FORMAT", $"{MoveEntityToPropertyKey} should start with a /"));
                 }
 
                 if(!_repo.TryGet(FindContentReference(moveToPath.Substring(1)), out moveTo))
                 {
-                    return BadRequest("target not found");
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "TARGET_CONTAINER_NOT_FOUND", "The target container was not found"));
                 }
                 
-                newProperties.Remove("__EpiserverMoveEntityTo");
+                newProperties.Remove(MoveEntityToPropertyKey);
             }
 
             if(newProperties.ContainsKey("Name"))
@@ -275,7 +282,7 @@ namespace ServiceAPIExtensions.Controllers
                 catch (ContentNotFoundException)
                 {
                     //even though we already check for this above, we still handle it here for cases that we might not have foreseen
-                    return BadRequest("target page not found");
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "TARGET_CONTAINER_NOT_FOUND", "The target container was not found"));
                 }
                 catch (AccessDeniedException)
                 {
