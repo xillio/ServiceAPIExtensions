@@ -60,3 +60,47 @@ Returns details on that content type
 
 GET /episerverapi/contenttype/typefor/{extension}
 Returns the content type that can handle that specific media type.
+
+
+## Error handling
+This extension tries to adhere to standard HTTP status codes, specifically:
+
+* 400: Bad request due to a client error, see below for the structure of errors
+* 401: Not authorized: the user doesn't have the necessary permission to an Episerver function. We use `ReadAccess` and `WriteAccess` as defined by the Episerver Service API (https://world.episerver.com/documentation/developer-guides/Episerver-Service-API/). Configure this in the Episerver Administration area -> CMS -> Admin -> Config -> Permissions for Functions -> EPiServerServiceApi.
+* 403: Forbidden: the user doesn't have access to an underlying Episerver resource. For example: it's forbidden to get the entity for a page for which you don't have `Read` rights, or move a page to a container for which you don't have `Create` rights.
+* 404: Not found. The resource wasn't found.
+* 500: An unexpected error occured. Contact the website administrator to resolve this.
+
+### 400 Error structure
+The structure for 400 errors is as follows:
+```
+{
+ "errorCode": <the error code>,
+ "validationErrors": {
+   <fieldname>:
+     [{
+       "errorCode": <the validation error code>,
+       "errorMsg": <a message describing the error>,
+       "name": <the fieldname>
+      },
+      ...]
+  ...}
+}
+```
+     
+The toplevel `errorCode`s are:
+
+* `BODY_EMPTY`: No body was provided with request.
+* `DELETE_ROOT_NOT_ALLOWED`: Deleting the root page in Episerver is not allowed.
+* `FIELD_VALIDATION_ERROR`: One or more fields failed to verify.
+* `UPDATE_ROOT_NOT_ALLOWED`: Updating the root page in Episerver is not allowed.
+
+The validation `errorCode`s are:
+
+* `CONTENT_TYPE_INVALID`: when creating an entity, the provided `ContentType` was invalid.
+* `FIELD_EPISERVER_VALIDATION_ERROR`: an Episerver validation failed. `errorMsg` contains the validation message from Episerver.
+* `FIELD_REQUIRED`: this field is required
+* `FIELD_INVALID_FORMAT`: the field had an unexpected format.
+* `FIELD_INVALID_TYPE`: the provided value for the field had the wrong data type (e.g. providing an integer where a string was required).
+* `FIELD_NOT_KNOWN`: a provided field was unexpected for the Episerver `ContentType`.
+* `TARGET_CONTAINER_NOT_FOUND`: when moving an entity, the provided target container was not found.
