@@ -21,6 +21,7 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -159,7 +160,8 @@ namespace ServiceAPIExtensions.Controllers
         {
             if (typerepo.ContainsKey(c.ContentTypeID))
                 return typerepo[c.ContentTypeID].Name;
-            return "";
+
+            throw new ContentTypeNotFoundException();
         }
 
         private static string GetBaseContentType(IContent c)
@@ -436,7 +438,7 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             var children = new List<Dictionary<string, object>>();
-            var typerepo = _typerepo.List().ToDictionary(x => x.ID, x => x);
+            var typerepo = _typerepo.List().ToDictionary(x => x.ID);
 
             // Collect sub pages
             children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, GetChildrenRecurseContentLevel, typerepo)));
@@ -464,7 +466,11 @@ namespace ServiceAPIExtensions.Controllers
             {
                 var content = _repo.Get<IContent>(contentReference);
                 if (content.IsDeleted) return NotFound();
-                return Ok(MapContent(content, 1, _typerepo.List().ToDictionary(x => x.ID, x => x)));
+                return Ok(MapContent(
+                    content,
+                    recurseContentLevelsRemaining: 1, 
+                    typerepo: _typerepo.List().ToDictionary(x => x.ID)
+                    ));
             }
             catch(ContentNotFoundException)
             {
@@ -617,6 +623,14 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             return sBuilder.ToString();
+        }
+    }
+
+    [Serializable]
+    internal class ContentTypeNotFoundException : Exception
+    {
+        public ContentTypeNotFoundException()
+        {
         }
     }
 }
