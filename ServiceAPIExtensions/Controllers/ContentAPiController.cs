@@ -65,7 +65,7 @@ namespace ServiceAPIExtensions.Controllers
             return ContentReference.EmptyReference;
         }
 
-        Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining)
+        static Dictionary<string, object> MapContent(IContent content, int recurseContentLevelsRemaining, Dictionary<int, ContentType> typerepo)
         {
             if (content == null)
             {
@@ -78,7 +78,7 @@ namespace ServiceAPIExtensions.Controllers
             result["ContentGuid"] = content.ContentGuid;
             result["ContentLink"] = content.ContentLink;
             result["ContentTypeID"] = content.ContentTypeID;
-            result["__EpiserverContentType"] = GetContentType(content);
+            result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
 
             var binaryContent = content as IBinaryStorable;
@@ -108,7 +108,7 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            foreach(var property in MapProperties(content.Property, recurseContentLevelsRemaining))
+            foreach(var property in MapProperties(content.Property, recurseContentLevelsRemaining, typerepo))
             {
                 result.Add(property.Key, property.Value);
             }
@@ -116,7 +116,7 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining)
+        static private Dictionary<string, object> MapProperties(PropertyDataCollection properties, int recurseContentLevelsRemaining, Dictionary<int, ContentType> typerepo)
         {
             var result = new Dictionary<string, object>();
             foreach (var pi in properties.Where(p => p.Value != null))
@@ -126,7 +126,7 @@ namespace ServiceAPIExtensions.Controllers
                     var contentData = pi.Value as IContentData;
                     if (contentData!=null)
                     {
-                        result.Add(pi.Name, MapProperties(contentData.Property, recurseContentLevelsRemaining-1));
+                        result.Add(pi.Name, MapProperties(contentData.Property, recurseContentLevelsRemaining-1, typerepo));
                     }
                 }
                 else if (pi is EPiServer.SpecializedProperties.PropertyContentArea)
@@ -139,7 +139,7 @@ namespace ServiceAPIExtensions.Controllers
                     var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
-                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1)).ToList());
+                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1, typerepo)).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
@@ -155,18 +155,14 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private string GetContentType(IContent c)
+        private static string GetContentType(IContent c, Dictionary<int, ContentType> typerepo)
         {
-            if (_typerepo.Load(c.GetOriginalType().Name) != null)
-                return c.GetOriginalType().Name;
-            
-            if (_typerepo.Load("Sys" + c.GetOriginalType().Name) != null)
-                return "Sys" + c.GetOriginalType().Name;
-
-            return GetBaseContentType(c);
+            if (typerepo.ContainsKey(c.ContentTypeID))
+                return typerepo[c.ContentTypeID].Name;
+            return "";
         }
 
-        private string GetBaseContentType(IContent c)
+        private static string GetBaseContentType(IContent c)
         {
             if(c is MediaData)
             {
@@ -440,9 +436,10 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             var children = new List<Dictionary<string, object>>();
+            var typerepo = _typerepo.List().ToDictionary(x => x.ID, x => x);
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
+            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, GetChildrenRecurseContentLevel, typerepo)));
 
             if (parentContent is PageData)
             {
@@ -450,7 +447,7 @@ namespace ServiceAPIExtensions.Controllers
                     parentContent.Property
                     .Where(p => p.Value != null && p.Value is ContentArea)
                     .Select(p=>p.Value as ContentArea)
-                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
+                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), GetChildrenRecurseContentLevel, typerepo))));
             }
 
             return Ok(children.ToArray());
@@ -467,7 +464,7 @@ namespace ServiceAPIExtensions.Controllers
             {
                 var content = _repo.Get<IContent>(contentReference);
                 if (content.IsDeleted) return NotFound();
-                return Ok(MapContent(content,recurseContentLevelsRemaining:1));
+                return Ok(MapContent(content, 1, _typerepo.List().ToDictionary(x => x.ID, x => x)));
             }
             catch(ContentNotFoundException)
             {
