@@ -431,7 +431,10 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
-            if (contentReference == ContentReference.RootPage && string.IsNullOrEmpty(path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
+            if (contentReference == ContentReference.RootPage)
+            {
+                return BadRequestErrorCode("DELETE_ROOT_NOT_ALLOWED");
+            }
 
             try
             {
