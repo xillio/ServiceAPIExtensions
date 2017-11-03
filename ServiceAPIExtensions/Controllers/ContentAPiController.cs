@@ -478,27 +478,6 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type-by-entity/{pageId}")]
-        public virtual IHttpActionResult GetContentTypeByPageId(string pageId)
-        {
-            pageId = pageId ?? "";
-
-            var contentRef = FindContentReference(pageId);
-
-            if (contentRef.Equals(ContentReference.EmptyReference))
-            {
-                return NotFound();
-            }
-
-            if (!_repo.TryGet(contentRef, out IContent content))
-            {
-                return NotFound();
-            }
-
-            return EpiserverContentTypeResult(content);
-        }
-
-
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
         public virtual IHttpActionResult GetContentType(string Type)
         {
