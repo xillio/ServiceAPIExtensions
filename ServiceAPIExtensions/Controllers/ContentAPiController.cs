@@ -21,7 +21,6 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
-using System.Runtime.Serialization;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -156,12 +155,13 @@ namespace ServiceAPIExtensions.Controllers
             return result;
         }
 
-        private static string GetContentType(IContent c, Dictionary<int, ContentType> typerepo)
+        private static string GetContentType(IContent content, Dictionary<int, ContentType> typerepo)
         {
-            if (typerepo.ContainsKey(c.ContentTypeID))
-                return typerepo[c.ContentTypeID].Name;
+            if (typerepo.ContainsKey(content.ContentTypeID))
+                return typerepo[content.ContentTypeID].Name;
 
-            throw new ContentTypeNotFoundException();
+            //this should never happen since we got the content /from/ Episerver, and we expect any content given out by Episerver to have a valid ContentType. 
+            throw new InvalidOperationException($"The content type for ContentTypeID={content.ContentTypeID} in Content={content.ContentLink} was not found");
         }
 
         private static string GetBaseContentType(IContent c)
@@ -602,14 +602,6 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             return sBuilder.ToString();
-        }
-    }
-
-    [Serializable]
-    internal class ContentTypeNotFoundException : Exception
-    {
-        public ContentTypeNotFoundException()
-        {
         }
     }
 }
