@@ -499,7 +499,7 @@ namespace ServiceAPIExtensions.Controllers
                 }
             }
 
-            if (content is PageData)
+            if (content is PageData || content is BlockData)
             {
                 return Ok(MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID)));
             }
