@@ -142,7 +142,6 @@ namespace ServiceAPIExtensions.Controllers
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
                     result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent().ContentLink.ID).ToList());
-                    //result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1, typerepo)).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
