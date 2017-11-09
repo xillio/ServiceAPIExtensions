@@ -316,7 +316,7 @@ namespace ServiceAPIExtensions.Controllers
                 }
                 throw;
             }
-         }
+        }
 
         IHttpActionResult BadRequestErrorCode(string errorCode)
         {
@@ -382,7 +382,7 @@ namespace ServiceAPIExtensions.Controllers
                 saveaction = EPiServer.DataAccess.SaveAction.Publish;
                 contentProperties.Remove("SaveAction");
             }
-            
+
             // Create content.
             IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
 
@@ -411,6 +411,10 @@ namespace ServiceAPIExtensions.Controllers
             catch(AccessDeniedException)
             {
                 return StatusCode(HttpStatusCode.Forbidden);
+            }
+            catch(EPiServerException e)
+            {
+                return BadRequestValidationErrors(ValidationError.TypeCannotBeUsed("ContentType", contentType.Name, _repo.Get<IContent>(parentContentRef).GetOriginalType().Name));
             }
         }
 
@@ -756,6 +760,11 @@ namespace ServiceAPIExtensions.Controllers
             public static ValidationError InvalidType(string fieldName, Type type)
             {
                 return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
+            }
+
+            public static ValidationError TypeCannotBeUsed(string fieldName, string type, string parent)
+            {
+                return new ValidationError { name = fieldName, errorCode = "TYPE_USAGE_ERROR", errorMsg = $"Content type \"{type}\" is not allowed to be created under parent of content type \"{parent}\"" };
             }
 
             public static ValidationError CustomError(string fieldName, string errorCode, string msg)
