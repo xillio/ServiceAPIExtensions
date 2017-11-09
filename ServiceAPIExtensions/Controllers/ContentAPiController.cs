@@ -501,16 +501,7 @@ namespace ServiceAPIExtensions.Controllers
 
             if (content is PageData)
             {
-                var page = content as PageData;
-
-                string url = string.Format("{0}://{1}:{2}{3}",
-                        HttpContext.Current.Request.Url.Scheme,
-                        HttpContext.Current.Request.Url.Host,
-                        HttpContext.Current.Request.Url.Port,
-                        page.Property["PageLinkUrl"].ToString()
-                        );
-
-                return Redirect(url);
+                return Ok(MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID)));
             }
 
             return StatusCode(HttpStatusCode.NoContent);
