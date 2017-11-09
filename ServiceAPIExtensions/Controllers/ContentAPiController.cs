@@ -141,7 +141,8 @@ namespace ServiceAPIExtensions.Controllers
                     var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
-                    result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1, typerepo)).ToList());
+                    result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent().ContentLink.ID).ToList());
+                    //result.Add(pi.Name, contentArea.Items.Select(i => MapContent(i.GetContent(), recurseContentLevelsRemaining-1, typerepo)).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
@@ -542,7 +543,7 @@ namespace ServiceAPIExtensions.Controllers
                 _repo
                 .GetChildren<IContent>(contentReference)
                 .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
-                .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
+                .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel, typerepo: typerepo)));
 
             if (parentContent is PageData)
             {
@@ -553,7 +554,7 @@ namespace ServiceAPIExtensions.Controllers
                     .SelectMany(ca => ca.Items
                         .Select(item => _repo.Get<IContent>(item.ContentLink))
                         .Where(item=>HasAccess(item,EPiServer.Security.AccessLevel.Read))
-                        .Select(item=> MapContent(item, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
+                        .Select(item=> MapContent(item, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel, typerepo: typerepo))));
             }
 
             return Ok(children.ToArray());
@@ -581,7 +582,7 @@ namespace ServiceAPIExtensions.Controllers
                 return StatusCode(HttpStatusCode.Forbidden);
             }
             
-            return Ok(MapContent(content, recurseContentLevelsRemaining: 1));
+            return Ok(MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID)));
         }
 
         bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
