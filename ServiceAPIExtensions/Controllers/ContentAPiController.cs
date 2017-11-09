@@ -21,6 +21,7 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
+using EPiServer.Validation;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -31,6 +32,7 @@ namespace ServiceAPIExtensions.Controllers
         IContentTypeRepository _typerepo = ServiceLocator.Current.GetInstance<IContentTypeRepository>();
         IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
         IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
+        EPiServer.Validation.IValidationService _validationService = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>();
 
         readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
         {
@@ -189,17 +191,24 @@ namespace ServiceAPIExtensions.Controllers
             return $"Unknown (ContentTypeID={c.ContentTypeID})";
         }
 
+        const string MoveEntityToPropertyKey = "__EpiserverMoveEntityTo";
+
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPut, Route("entity/{*path}")]
         public virtual IHttpActionResult UpdateContent(string path, [FromBody] Dictionary<string,object> newProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
             path = path ?? "";
             var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
-            if (contentRef == ContentReference.RootPage) return BadRequest("Cannot update Root entity");
+            if (contentRef == ContentReference.RootPage) return BadRequestErrorCode("UPDATE_ROOT_NOT_ALLOWED");
 
             if(!_repo.TryGet(contentRef, out IContent originalContent))
             {
                 return NotFound();
+            }
+
+            if(newProperties==null)
+            {
+                return BadRequestErrorCode("BODY_EMPTY");
             }
 
             var content = (originalContent as IReadOnly).CreateWritableClone() as IContent;
@@ -211,16 +220,27 @@ namespace ServiceAPIExtensions.Controllers
                 newProperties.Remove("SaveAction");
             }
 
-            string moveToPath = null;
+            IContent moveTo = null;
 
-            if(newProperties.ContainsKey("__EpiserverMoveEntityTo"))
+            if(newProperties.ContainsKey(MoveEntityToPropertyKey))
             {
-                moveToPath = (string)newProperties["__EpiserverMoveEntityTo"];
+                if(!(newProperties[MoveEntityToPropertyKey] is string))
+                {
+                    return BadRequestValidationErrors(ValidationError.InvalidType(MoveEntityToPropertyKey, typeof(string)));
+                }
+
+                var moveToPath = (string)newProperties[MoveEntityToPropertyKey];
                 if (!moveToPath.StartsWith("/"))
                 {
-                    return BadRequest("__EpiserverMoveEntityTo should start with a /");
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "FIELD_INVALID_FORMAT", $"{MoveEntityToPropertyKey} should start with a /"));
                 }
-                newProperties.Remove("__EpiserverMoveEntityTo");
+
+                if(!_repo.TryGet(FindContentReference(moveToPath.Substring(1)), out moveTo))
+                {
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "TARGET_CONTAINER_NOT_FOUND", "The target container was not found"));
+                }
+                
+                newProperties.Remove(MoveEntityToPropertyKey);
             }
 
             if(newProperties.ContainsKey("Name"))
@@ -230,26 +250,54 @@ namespace ServiceAPIExtensions.Controllers
             }
             
             // Store the new information in the object.
-            var error = UpdateContentProperties(newProperties, content);
-            if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
+            var errors = UpdateContentProperties(newProperties, content);
+            if(errors.Any())
+            {
+                return BadRequestValidationErrors(errors.ToArray());
+            }
 
-            var validationErrors = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>().Validate(content);
+            var validationErrors = _validationService.Validate(content);
 
             if (validationErrors.Any())
             {
-                return BadRequest(validationErrors.First().ErrorMessage);
+                return BadRequestValidationErrors(validationErrors.Select(ValidationError.FromEpiserver).ToArray());
             }
 
-            if (moveToPath != null)
+            if(!HasAccess(content,EPiServer.Security.AccessLevel.Edit | EPiServer.Security.AccessLevel.Publish))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+            
+            if(moveTo!=null)
+            {
+                if(!HasAccess(content, EPiServer.Security.AccessLevel.Read | EPiServer.Security.AccessLevel.Delete))
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
+
+                if (!HasAccess(moveTo, EPiServer.Security.AccessLevel.Create | EPiServer.Security.AccessLevel.Publish))
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
+            }
+
+            //from here on we're going to try to save things to the database, we have tried to optimize the chance of succeeding above
+
+            if (moveTo != null)
             {
                 try
                 {
-                    var moveTo = FindContentReference(moveToPath.Substring(1));
-                    _repo.Move(contentRef, moveTo);
+                    _repo.Move(contentRef, moveTo.ContentLink);
                 }
                 catch (ContentNotFoundException)
                 {
-                    return BadRequest("target page not found");
+                    //even though we already check for this above, we still handle it here for cases that we might not have foreseen
+                    return BadRequestValidationErrors(ValidationError.CustomError(MoveEntityToPropertyKey, "TARGET_CONTAINER_NOT_FOUND", "The target container was not found"));
+                }
+                catch (AccessDeniedException)
+                {
+                    //even though we already check for this above, we still handle it here for cases that we might not have foreseen
+                    return StatusCode(HttpStatusCode.Forbidden);
                 }
             }
 
@@ -261,7 +309,7 @@ namespace ServiceAPIExtensions.Controllers
             }
             catch (Exception ex)
             {
-                if(moveToPath!=null)
+                if(moveTo!=null)
                 {
                     //try to undo the move. We've tried using TransactionScope for this, but it doesn't play well with Episerver (caching, among other problems)
                     _repo.Move(contentRef, originalContent.ParentLink);
@@ -269,6 +317,19 @@ namespace ServiceAPIExtensions.Controllers
                 throw;
             }
          }
+
+        IHttpActionResult BadRequestErrorCode(string errorCode)
+        {
+            return Content(HttpStatusCode.BadRequest, new { errorCode });
+        }
+        
+        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
+        {
+            return Content(HttpStatusCode.BadRequest, new {
+                errorCode = "FIELD_VALIDATION_ERROR",
+                validationErrors = errors.GroupBy(x=>x.name).ToDictionary(x=>x.Key, x=>x.ToList())
+            });
+        }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
@@ -284,27 +345,36 @@ namespace ServiceAPIExtensions.Controllers
             // Instantiate content of named type.
             if (contentProperties == null)
             {
-                return BadRequest("No properties specified");
+                return BadRequestErrorCode("BODY_EMPTY");
             }
 
-            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString) || !(contentTypeString is string))
+            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString))
             {
-                return BadRequest("'ContentType' is a required field.");
+                return BadRequestValidationErrors(ValidationError.Required("ContentType"));
+            }
+            contentProperties.Remove("ContentType");
+
+            if (!(contentTypeString is string))
+            {
+                return BadRequestValidationErrors(ValidationError.InvalidType("ContentType", typeof(string)));
             }
 
             // Check ContentType.
             ContentType contentType = FindEpiserverContentType(contentTypeString);
             if (contentType == null)
             {
-                return BadRequest($"'{contentTypeString}' is an invalid ContentType");
+                return BadRequestValidationErrors(ValidationError.CustomError("ContentType", "CONTENT_TYPE_INVALID", $"Could not find contentType {contentTypeString}"));
             }
-            contentProperties.Remove("ContentType");
-
-            if (!contentProperties.TryGetValue("Name", out object nameValue) || !(nameValue is string))
+            
+            if (!contentProperties.TryGetValue("Name", out object nameValue))
             {
-                return BadRequest("Name is a required field");
+                return BadRequestValidationErrors(ValidationError.Required("Name"));
             }
             contentProperties.Remove("Name");
+
+            if(!(nameValue is string)) {
+                return BadRequestValidationErrors(ValidationError.InvalidType("Name", typeof(string)));
+            }
             
             EPiServer.DataAccess.SaveAction saveaction = action;
             if (contentProperties.ContainsKey("SaveAction") && (string)contentProperties["SaveAction"] == "Publish")
@@ -319,8 +389,18 @@ namespace ServiceAPIExtensions.Controllers
             content.Name = (string)nameValue;
 
             // Set all the other values.
-            var error = UpdateContentProperties(contentProperties, content);
-            if (!string.IsNullOrEmpty(error)) return BadRequest($"Invalid property '{error}'");
+            var errors = UpdateContentProperties(contentProperties, content);
+            if (errors.Any())
+            {
+                return BadRequestValidationErrors(errors.ToArray());
+            }
+            
+            var validationErrors = _validationService.Validate(content);
+
+            if(validationErrors.Any())
+            {
+                return BadRequestValidationErrors(validationErrors.Select(ValidationError.FromEpiserver).ToArray());
+            }
 
             // Save the reference with the requested save action.
             try
@@ -328,9 +408,9 @@ namespace ServiceAPIExtensions.Controllers
                 var createdReference = _repo.Save(content, saveaction);
                 return Created(path, new { reference = createdReference.ID });
             }
-            catch (ValidationException ex)
+            catch(AccessDeniedException)
             {
-                return BadRequest(ex.Message);
+                return StatusCode(HttpStatusCode.Forbidden);
             }
         }
 
@@ -361,17 +441,24 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
-            if (contentReference == ContentReference.RootPage && string.IsNullOrEmpty(path)) return BadRequest("'root' can only be deleted by specifying its name in the path!");
+            if (contentReference == ContentReference.RootPage)
+            {
+                return BadRequestErrorCode("DELETE_ROOT_NOT_ALLOWED");
+            }
 
             try
             {
                 _repo.MoveToWastebasket(contentReference);
+                return Ok();
             }
             catch(ContentNotFoundException e)
             {
                 return NotFound();
             }
-            return Ok();
+            catch(AccessDeniedException)
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("binary/{*path}")]
@@ -383,6 +470,11 @@ namespace ServiceAPIExtensions.Controllers
                 
             if(!_repo.TryGet(contentRef, out IContent content)) {
                 return NotFound();
+            }
+
+            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
             }
 
             if (content is IBinaryStorable)
@@ -425,7 +517,7 @@ namespace ServiceAPIExtensions.Controllers
         }
 
         const int GetChildrenRecurseContentLevel = 1;
-
+        
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
         {
@@ -437,11 +529,20 @@ namespace ServiceAPIExtensions.Controllers
                 return NotFound();
             }
 
+            if(!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+
             var children = new List<Dictionary<string, object>>();
             var typerepo = _typerepo.List().ToDictionary(x => x.ID);
 
             // Collect sub pages
-            children.AddRange(_repo.GetChildren<IContent>(contentReference).Select(x => MapContent(x, GetChildrenRecurseContentLevel, typerepo)));
+            children.AddRange(
+                _repo
+                .GetChildren<IContent>(contentReference)
+                .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
+                .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel)));
 
             if (parentContent is PageData)
             {
@@ -449,7 +550,10 @@ namespace ServiceAPIExtensions.Controllers
                     parentContent.Property
                     .Where(p => p.Value != null && p.Value is ContentArea)
                     .Select(p=>p.Value as ContentArea)
-                    .SelectMany(ca => ca.Items.Select(item=> MapContent(_repo.Get<IContent>(item.ContentLink), GetChildrenRecurseContentLevel, typerepo))));
+                    .SelectMany(ca => ca.Items
+                        .Select(item => _repo.Get<IContent>(item.ContentLink))
+                        .Where(item=>HasAccess(item,EPiServer.Security.AccessLevel.Read))
+                        .Select(item=> MapContent(item, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel))));
             }
 
             return Ok(children.ToArray());
@@ -461,21 +565,35 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
-
-            try
-            {
-                var content = _repo.Get<IContent>(contentReference);
-                if (content.IsDeleted) return NotFound();
-                return Ok(MapContent(
-                    content,
-                    recurseContentLevelsRemaining: 1, 
-                    typerepo: _typerepo.List().ToDictionary(x => x.ID)
-                    ));
-            }
-            catch(ContentNotFoundException)
+            
+            if(!_repo.TryGet(contentReference, out IContent content))
             {
                 return NotFound();
             }
+
+            if (content.IsDeleted)
+            {
+                return NotFound();
+            }
+
+            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+            
+            return Ok(MapContent(content, recurseContentLevelsRemaining: 1));
+        }
+
+        bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
+        {
+            var securable = content as EPiServer.Security.ISecurable;
+
+            if(securable==null)
+            {
+                return true;
+            }
+
+            return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
@@ -524,17 +642,31 @@ namespace ServiceAPIExtensions.Controllers
             md.BinaryData = blob;
         }
 
-        private string UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
+        private List<ValidationError> UpdateContentProperties(IDictionary<string, object> newProperties, IContent content)
         {
+            var result = new List<ValidationError>();
+
             foreach (var propertyName in newProperties.Keys)
             {
-                var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"],  propertyName, newProperties[propertyName]);
-                if (!string.IsNullOrEmpty(errorMessage))
+                try
                 {
-                    return errorMessage;
+                    var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"], propertyName, newProperties[propertyName]);
+                    if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        result.Add(ValidationError.FieldNotKnown(propertyName));
+                    }
+                }
+                catch (InvalidCastException e)
+                {
+                    result.Add(ValidationError.InvalidType(propertyName));
+                }
+                
+                catch(FormatException)
+                {
+                    result.Add(ValidationError.InvalidType(propertyName));
                 }
             }
-            return null;
+            return result;
         }
 
         private string UpdateFieldOnContent(IContent con, string contentName, string propertyName, object value)
@@ -602,6 +734,48 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             return sBuilder.ToString();
+        }
+
+
+
+        class ValidationError
+        {
+            public string errorCode { get; set; }
+            public string errorMsg { get; set; }
+            public string name { get; set; }
+
+            public static ValidationError Required(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_REQUIRED", errorMsg = "Field is required" };
+            }
+
+            public static ValidationError InvalidType(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type" };
+            }
+            public static ValidationError InvalidType(string fieldName, Type type)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_INVALID_TYPE", errorMsg = $"Invalid field type, should be {type.Name}" };
+            }
+
+            public static ValidationError CustomError(string fieldName, string errorCode, string msg)
+            {
+                return new ValidationError { name = fieldName, errorCode = errorCode, errorMsg = msg };
+            }
+
+            public static ValidationError FieldNotKnown(string fieldName)
+            {
+                return new ValidationError { name = fieldName, errorCode = "FIELD_NOT_KNOWN", errorMsg = $"Field '{fieldName}' is not known"};
+            }
+
+            public static ValidationError FromEpiserver(EPiServer.Validation.ValidationError epiValidation)
+            {
+                if(epiValidation.Source is EPiServer.Validation.Internal.RequiredPropertyValidator)
+                {
+                    return Required(epiValidation.PropertyName);
+                }
+                return new ValidationError { name = epiValidation.PropertyName, errorCode = "FIELD_EPISERVER_VALIDATION_ERROR", errorMsg = epiValidation.ErrorMessage };
+            }
         }
     }
 }
