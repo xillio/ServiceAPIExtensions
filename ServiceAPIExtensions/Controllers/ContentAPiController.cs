@@ -43,6 +43,25 @@ namespace ServiceAPIExtensions.Controllers
             { "siteblock" , ContentReference.SiteBlockFolder }
         };
 
+        //If one of these properties is altered no error is thrown.
+        readonly static List<String> NonUpdatingProperties = new List<string>(
+            new String[] {
+                "PageCategory"
+            });
+
+        //These properties will be removed from any alteration call as they cannot be changed.
+        readonly static List<String> NonCreatingProperties = new List<string>(
+            new String[] {
+                "ContentGuid",
+                "__EpiserverBaseContentType",
+                "ParentLink",
+                "PageLink",
+                "PageParentLink",
+                "PageGUID",
+                "ContentTypeID",
+                "ContentLink"
+            });
+
         /// <summary>
         /// Finds the content with the given name
         /// </summary>
@@ -211,6 +230,12 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequestErrorCode("BODY_EMPTY");
             }
 
+            foreach (String property in NonCreatingProperties)
+            {
+                if (newProperties.ContainsKey(property))
+                    newProperties.Remove(property);
+            }
+
             var content = (originalContent as IReadOnly).CreateWritableClone() as IContent;
             
             EPiServer.DataAccess.SaveAction saveaction = action;
@@ -348,11 +373,18 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequestErrorCode("BODY_EMPTY");
             }
 
-            if (!contentProperties.TryGetValue("ContentType", out object contentTypeString))
+            foreach (String property in NonCreatingProperties)
+            {
+                if (contentProperties.ContainsKey(property))
+                    contentProperties.Remove(property);
+            }
+            object contentTypeString;
+            if (!(contentProperties.TryGetValue("ContentType", out contentTypeString)|| contentProperties.TryGetValue("__EpiserverContentType", out contentTypeString)))
             {
                 return BadRequestValidationErrors(ValidationError.Required("ContentType"));
             }
             contentProperties.Remove("ContentType");
+            contentProperties.Remove("__EpiserverContentType");
 
             if (!(contentTypeString is string))
             {
@@ -505,7 +537,8 @@ namespace ServiceAPIExtensions.Controllers
 
             if (content is PageData || content is BlockData)
             {
-                return Ok(MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID)));
+                Dictionary<String, Object> map = MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID));
+                return Ok(map);
             }
 
             return StatusCode(HttpStatusCode.NoContent);
@@ -591,14 +624,22 @@ namespace ServiceAPIExtensions.Controllers
             return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
         }
 
-        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{Type}")]
-        public virtual IHttpActionResult GetContentType(string Type)
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{type}")]
+        public virtual IHttpActionResult GetContentType(string type)
         {
-            var episerverType = _typerepo.Load(Type);
+            var episerverType = _typerepo.Load(type);
 
             if(episerverType==null)
             {
-                return NotFound();
+                var contentReference = FindContentReference(type);
+                if (contentReference == ContentReference.EmptyReference) return NotFound();
+                if (!_repo.TryGet(contentReference, out IContent content)) return NotFound();
+                if (content.IsDeleted) return NotFound();
+                if (!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
+                return EpiserverContentTypeResult(content);
             }
 
             var page = _repo.GetDefault<IContent>(ContentReference.RootPage, episerverType.ID);
@@ -612,6 +653,7 @@ namespace ServiceAPIExtensions.Controllers
                             new
                             {
                                 TypeName = content.GetOriginalType().Name,
+                                BaseType = GetBaseContentType(content),
                                 Properties = content.Property.Select(p => new { Name = p.Name, Type = p.Type.ToString() })
                             },
                             new JsonSerializerSettings(),
@@ -648,7 +690,7 @@ namespace ServiceAPIExtensions.Controllers
                     var errorMessage = UpdateFieldOnContent(content, content.Name ?? (string)newProperties["Name"], propertyName, newProperties[propertyName]);
                     if (!string.IsNullOrEmpty(errorMessage))
                     {
-                        result.Add(ValidationError.FieldNotKnown(propertyName));
+                        result.Add(ValidationError.FieldNotKnown(propertyName)); 
                     }
                 }
                 catch (InvalidCastException e)
@@ -700,7 +742,7 @@ namespace ServiceAPIExtensions.Controllers
                         con.Property[propertyName].ParseToSelf((string)value);
                     }
                 }
-                else
+                else if (!NonUpdatingProperties.Contains(propertyName))
                 {
                     con.Property[propertyName].Value = value;
                 }
