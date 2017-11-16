@@ -22,6 +22,8 @@ using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
 using EPiServer.Validation;
+using System.Globalization;
+using EPiServer.Globalization;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -101,6 +103,8 @@ namespace ServiceAPIExtensions.Controllers
             result["ContentTypeID"] = content.ContentTypeID;
             result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
+            result["__EpiserverAvailableLanguages"] = GetLanguages();
+            result["__EpiserverCurrentLanguage"] = GetLanguage(content);
 
             var binaryContent = content as IBinaryStorable;
 
@@ -356,6 +360,15 @@ namespace ServiceAPIExtensions.Controllers
             });
         }
 
+        IHttpActionResult BadRequestInvalidLanguage(string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "INVALID_LANGUAGE_ERROR",
+                errorMessage = $"Invalid language given: '{language}'"
+            });
+        }
+
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
@@ -553,11 +566,17 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
 
-            if (!_repo.TryGet(contentReference, out IContent parentContent)) {
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+            
+            if (!_repo.TryGet(contentReference, cultureInfo, out IContent parentContent))
+            {
                 return NotFound();
             }
 
-            if(!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
+            if (!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
             {
                 return StatusCode(HttpStatusCode.Forbidden);
             }
@@ -568,7 +587,7 @@ namespace ServiceAPIExtensions.Controllers
             // Collect sub pages
             children.AddRange(
                 _repo
-                .GetChildren<IContent>(contentReference)
+                .GetChildren<IContent>(contentReference, cultureInfo)
                 .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
                 .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel, typerepo: typerepo)));
 
@@ -594,7 +613,12 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
             
-            if(!_repo.TryGet(contentReference, out IContent content))
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentReference, cultureInfo, out IContent content))
             {
                 return NotFound();
             }
@@ -773,7 +797,65 @@ namespace ServiceAPIExtensions.Controllers
             return sBuilder.ToString();
         }
 
+        private bool TryGetCultureInfo(out string language, out CultureInfo cultureInfo)
+        {
+            var query = Request.GetQueryNameValuePairs().Where(kv => kv.Key == "language").FirstOrDefault();
 
+            language = query.Value;
+
+            if (!String.IsNullOrEmpty(language))
+            {
+                try
+                {
+                    var culture = CultureInfo
+                    .GetCultures(CultureTypes.AllCultures)
+                    .Where(ci => String.Equals(ci.Name, query.Value)) // Cannot use out parameters inside of a lambda.. therefore query was used again
+                    .First();
+                    
+                    // Episerver onlu support the two-letter cultures. So e.g. en-US should be en.
+                    cultureInfo = culture.TwoLetterISOLanguageName != null ? 
+                        CultureInfo.GetCultureInfo(culture.TwoLetterISOLanguageName) :
+                        culture;
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    cultureInfo = null;
+                    return false;
+                }
+            }
+
+            cultureInfo = ContentLanguage.PreferredCulture;
+            return true;
+        }
+
+        private static IEnumerable<CultureInfo> GetLanguages()
+        {
+            return DataFactory.Instance.GetPage(PageReference.StartPage).ExistingLanguages;
+        }
+
+        private static string GetLanguage(IContent content)
+        {
+            PageData pagedata = content as PageData;
+            if (pagedata != null)
+            {
+                return pagedata.Language.Name;
+            }
+
+            BlockData blockdata = content as BlockData;
+            if (blockdata != null)
+            {
+                foreach (CultureInfo ci in GetLanguages())
+                {
+                    var check = DataFactory.Instance.Get<IContent>(content.ContentLink, ci);
+                    if (check == content)
+                        return ci.TwoLetterISOLanguageName;
+                }
+            }
+            
+            // Files and media do not have languages
+            return "";
+        }
 
         class ValidationError
         {
