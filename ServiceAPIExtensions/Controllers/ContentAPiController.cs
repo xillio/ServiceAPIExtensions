@@ -227,12 +227,17 @@ namespace ServiceAPIExtensions.Controllers
             if (contentRef == ContentReference.EmptyReference) return NotFound();
             if (contentRef == ContentReference.RootPage) return BadRequestErrorCode("UPDATE_ROOT_NOT_ALLOWED");
 
-            if(!_repo.TryGet(contentRef, out IContent originalContent))
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentRef, cultureInfo, out IContent originalContent))
             {
                 return NotFound();
             }
 
-            if(newProperties==null)
+            if (newProperties==null)
             {
                 return BadRequestErrorCode("BODY_EMPTY");
             }
@@ -488,6 +493,33 @@ namespace ServiceAPIExtensions.Controllers
             if (contentReference == ContentReference.RootPage)
             {
                 return BadRequestErrorCode("DELETE_ROOT_NOT_ALLOWED");
+            }
+
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!String.IsNullOrEmpty(language))
+            {
+                if (!_repo.TryGet(contentReference, cultureInfo, out IContent _))
+                {
+                    return NotFound();
+                }
+
+                if (string.Equals(cultureInfo.TwoLetterISOLanguageName, ContentLanguage.PreferredCulture.TwoLetterISOLanguageName))
+                {
+                    return BadRequestMasterLanguage(language);
+                }
+
+                try
+                {
+                    _repo.DeleteLanguageBranch(contentReference, cultureInfo.TwoLetterISOLanguageName, EPiServer.Security.AccessLevel.Delete);
+                    return Ok();
+                } catch (AccessDeniedException)
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
             }
 
             try
@@ -876,6 +908,15 @@ namespace ServiceAPIExtensions.Controllers
             {
                 errorCode = "INVALID_LANGUAGE_ERROR",
                 errorMessage = $"Invalid language given: '{language}'"
+            });
+        }
+
+        IHttpActionResult BadRequestMasterLanguage(string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "MASTER_LANGUAGE_ERROR",
+                errorMessage = $"Cannot delete language branch '{language}' since it is the master language for this content."
             });
         }
 
