@@ -36,6 +36,8 @@ namespace ServiceAPIExtensions.Controllers
         IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
         EPiServer.Validation.IValidationService _validationService = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>();
 
+        const int GetChildrenRecurseContentLevel = 1;
+
         readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
         {
             { "", ContentReference.RootPage },
@@ -104,6 +106,7 @@ namespace ServiceAPIExtensions.Controllers
             result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
             result["__EpiserverAvailableLanguages"] = GetLanguages();
+            result["__EpiserverDefaultLanguage"] = ContentLanguage.PreferredCulture;
             result["__EpiserverCurrentLanguage"] = GetLanguage(content);
 
             var binaryContent = content as IBinaryStorable;
@@ -516,12 +519,18 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
-                
-            if(!_repo.TryGet(contentRef, out IContent content)) {
+
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentRef, cultureInfo, out IContent content))
+            {
                 return NotFound();
             }
 
-            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            if (!HasAccess(content, EPiServer.Security.AccessLevel.Read))
             {
                 return StatusCode(HttpStatusCode.Forbidden);
             }
@@ -556,8 +565,6 @@ namespace ServiceAPIExtensions.Controllers
 
             return StatusCode(HttpStatusCode.NoContent);
         }
-
-        const int GetChildrenRecurseContentLevel = 1;
         
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
