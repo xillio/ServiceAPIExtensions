@@ -350,28 +350,6 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        IHttpActionResult BadRequestErrorCode(string errorCode)
-        {
-            return Content(HttpStatusCode.BadRequest, new { errorCode });
-        }
-        
-        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
-        {
-            return Content(HttpStatusCode.BadRequest, new {
-                errorCode = "FIELD_VALIDATION_ERROR",
-                validationErrors = errors.GroupBy(x=>x.name).ToDictionary(x=>x.Key, x=>x.ToList())
-            });
-        }
-
-        IHttpActionResult BadRequestInvalidLanguage(string language)
-        {
-            return Content(HttpStatusCode.BadRequest, new
-            {
-                errorCode = "INVALID_LANGUAGE_ERROR",
-                errorMessage = $"Invalid language given: '{language}'"
-            });
-        }
-
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
@@ -432,7 +410,42 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             // Create content.
-            IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
+            IContent content;
+
+            // Check if a Language tag is set.
+            if (contentProperties.TryGetValue("__EpiserverCurrentLanguage", out object languageValue))
+            {
+                if (!(languageValue is string))
+                {
+                    return BadRequestValidationErrors(ValidationError.InvalidType("__EpiserverCurrentLanguage", typeof(string)));
+                }
+
+                CultureInfo cultureInfo = null;
+                try
+                {
+                    cultureInfo = CultureInfo.GetCultureInfo((string)languageValue);
+                } catch (Exception)
+                {
+                    return BadRequestInvalidLanguage(languageValue.ToString());
+                }
+
+                if (!GetLanguages().Any(ci => ci.TwoLetterISOLanguageName == cultureInfo.TwoLetterISOLanguageName))
+                {
+                    return BadRequestInvalidLanguage(languageValue.ToString());
+                }
+
+                if (_repo.TryGet<IContent>(parentContentRef, cultureInfo, out IContent parent))
+                {
+                    return BadRequestLanguageBranchExists(parent, cultureInfo.TwoLetterISOLanguageName);
+                }
+
+                
+                content = _repo.CreateLanguageBranch<IContent>(parentContentRef, cultureInfo);
+                contentProperties.Remove("__EpiserverCurrentLanguage");
+            } else
+            {
+                content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
+            }
 
             content.Name = (string)nameValue;
 
@@ -464,27 +477,6 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(ValidationError.TypeCannotBeUsed("ContentType", contentType.Name, _repo.Get<IContent>(parentContentRef).GetOriginalType().Name));
             }
-        }
-
-        private bool ReferenceExists(ContentReference contentRef)
-        {
-            return _repo.TryGet(contentRef, out IContent cont);
-        }
-
-        private ContentType FindEpiserverContentType(object contentTypeString)
-        {
-            var contentType = _typerepo.Load((string)contentTypeString);
-
-            if(contentType!=null)
-            {
-                return contentType;
-            }
-
-            if(int.TryParse((string)contentTypeString, out int contentTypeId)) {
-                return _typerepo.Load(contentTypeId);
-            }
-            
-            return null;
         }
 
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*path}")]
@@ -862,6 +854,60 @@ namespace ServiceAPIExtensions.Controllers
             
             // Files and media do not have languages
             return "";
+        }
+
+        IHttpActionResult BadRequestErrorCode(string errorCode)
+        {
+            return Content(HttpStatusCode.BadRequest, new { errorCode });
+        }
+
+        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "FIELD_VALIDATION_ERROR",
+                validationErrors = errors.GroupBy(x => x.name).ToDictionary(x => x.Key, x => x.ToList())
+            });
+        }
+
+        IHttpActionResult BadRequestInvalidLanguage(string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "INVALID_LANGUAGE_ERROR",
+                errorMessage = $"Invalid language given: '{language}'"
+            });
+        }
+
+        IHttpActionResult BadRequestLanguageBranchExists(IContent content, string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "LANGUAGE_BRANCH_ALREADY_EXISTS",
+                errorMessage = $"Given language '{language}' already exists for content of ID '{content.ContentLink}'"
+            });
+        }
+
+        private bool ReferenceExists(ContentReference contentRef)
+        {
+            return _repo.TryGet(contentRef, out IContent cont);
+        }
+
+        private ContentType FindEpiserverContentType(object contentTypeString)
+        {
+            var contentType = _typerepo.Load((string)contentTypeString);
+
+            if (contentType != null)
+            {
+                return contentType;
+            }
+
+            if (int.TryParse((string)contentTypeString, out int contentTypeId))
+            {
+                return _typerepo.Load(contentTypeId);
+            }
+
+            return null;
         }
 
         class ValidationError
