@@ -438,6 +438,7 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     return BadRequestInvalidLanguage(languageValue.ToString());
                 }
+                cultureInfo = new CultureInfo(cultureInfo.TwoLetterISOLanguageName);
 
                 if (_repo.TryGet<IContent>(parentContentRef, cultureInfo, out IContent parent))
                 {
