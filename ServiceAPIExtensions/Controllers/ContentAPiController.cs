@@ -105,7 +105,7 @@ namespace ServiceAPIExtensions.Controllers
             result["ContentTypeID"] = content.ContentTypeID;
             result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
-            result["__EpiserverAvailableLanguages"] = GetLanguages();
+            result["__EpiserverAvailableLanguages"] = GetLanguages(content);
             result["__EpiserverDefaultLanguage"] = ContentLanguage.PreferredCulture;
             result["__EpiserverCurrentLanguage"] = GetLanguage(content);
 
@@ -864,6 +864,24 @@ namespace ServiceAPIExtensions.Controllers
         private static IEnumerable<CultureInfo> GetLanguages()
         {
             return DataFactory.Instance.GetPage(PageReference.StartPage).ExistingLanguages;
+        }
+
+        private static IEnumerable<CultureInfo> GetLanguages(IContent content)
+        {
+            PageData pagedata = content as PageData;
+            if (pagedata != null)
+            {
+                return pagedata.ExistingLanguages;
+            }
+
+            BlockData blockdata = content as BlockData;
+            if (blockdata != null)
+            {
+                return GetLanguages().Where(c => DataFactory.Instance.Get<IContent>(content.ContentLink, c) != null);
+            }
+
+            // Files and media do not have languages
+            return null;
         }
 
         private static string GetLanguage(IContent content)
