@@ -22,6 +22,8 @@ using System.Text;
 using System.Security.Cryptography;
 using System.ComponentModel.DataAnnotations;
 using EPiServer.Validation;
+using System.Globalization;
+using EPiServer.Globalization;
 
 namespace ServiceAPIExtensions.Controllers
 {
@@ -33,6 +35,8 @@ namespace ServiceAPIExtensions.Controllers
         IRawContentRetriever _rc = ServiceLocator.Current.GetInstance<IRawContentRetriever>();
         IBlobFactory _blobfactory = ServiceLocator.Current.GetInstance<IBlobFactory>();
         EPiServer.Validation.IValidationService _validationService = ServiceLocator.Current.GetInstance<EPiServer.Validation.IValidationService>();
+
+        const int GetChildrenRecurseContentLevel = 1;
 
         readonly static Dictionary<String, ContentReference> constantContentReferenceMap = new Dictionary<string, ContentReference>
         {
@@ -101,6 +105,9 @@ namespace ServiceAPIExtensions.Controllers
             result["ContentTypeID"] = content.ContentTypeID;
             result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
+            result["__EpiserverAvailableLanguages"] = GetLanguages(content);
+            result["__EpiserverDefaultLanguage"] = ContentLanguage.PreferredCulture;
+            result["__EpiserverCurrentLanguage"] = GetLanguage(content);
 
             var binaryContent = content as IBinaryStorable;
 
@@ -160,7 +167,7 @@ namespace ServiceAPIExtensions.Controllers
                     var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
-                    result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent().ContentLink.ID).ToList());
+                    result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent()?.ContentLink?.ID).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
@@ -220,12 +227,17 @@ namespace ServiceAPIExtensions.Controllers
             if (contentRef == ContentReference.EmptyReference) return NotFound();
             if (contentRef == ContentReference.RootPage) return BadRequestErrorCode("UPDATE_ROOT_NOT_ALLOWED");
 
-            if(!_repo.TryGet(contentRef, out IContent originalContent))
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentRef, cultureInfo, out IContent originalContent))
             {
                 return NotFound();
             }
 
-            if(newProperties==null)
+            if (newProperties==null)
             {
                 return BadRequestErrorCode("BODY_EMPTY");
             }
@@ -343,19 +355,6 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        IHttpActionResult BadRequestErrorCode(string errorCode)
-        {
-            return Content(HttpStatusCode.BadRequest, new { errorCode });
-        }
-        
-        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
-        {
-            return Content(HttpStatusCode.BadRequest, new {
-                errorCode = "FIELD_VALIDATION_ERROR",
-                validationErrors = errors.GroupBy(x=>x.name).ToDictionary(x=>x.Key, x=>x.ToList())
-            });
-        }
-
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpPost, Route("entity/{*path}")]
         public virtual IHttpActionResult CreateContent(string path, [FromBody] Dictionary<string,object> contentProperties, EPiServer.DataAccess.SaveAction action = EPiServer.DataAccess.SaveAction.Save)
         {
@@ -416,7 +415,43 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             // Create content.
-            IContent content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
+            IContent content;
+
+            // Check if a Language tag is set.
+            if (contentProperties.TryGetValue("__EpiserverCurrentLanguage", out object languageValue))
+            {
+                if (!(languageValue is string))
+                {
+                    return BadRequestValidationErrors(ValidationError.InvalidType("__EpiserverCurrentLanguage", typeof(string)));
+                }
+
+                CultureInfo cultureInfo = null;
+                try
+                {
+                    cultureInfo = CultureInfo.GetCultureInfo((string)languageValue);
+                } catch (Exception)
+                {
+                    return BadRequestInvalidLanguage(languageValue.ToString());
+                }
+
+                if (!GetLanguages().Any(ci => ci.TwoLetterISOLanguageName == cultureInfo.TwoLetterISOLanguageName))
+                {
+                    return BadRequestInvalidLanguage(languageValue.ToString());
+                }
+                cultureInfo = new CultureInfo(cultureInfo.TwoLetterISOLanguageName);
+
+                if (_repo.TryGet<IContent>(parentContentRef, cultureInfo, out IContent parent))
+                {
+                    return BadRequestLanguageBranchExists(parent, cultureInfo.TwoLetterISOLanguageName);
+                }
+
+                
+                content = _repo.CreateLanguageBranch<IContent>(parentContentRef, cultureInfo);
+                contentProperties.Remove("__EpiserverCurrentLanguage");
+            } else
+            {
+                content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
+            }
 
             content.Name = (string)nameValue;
 
@@ -450,27 +485,6 @@ namespace ServiceAPIExtensions.Controllers
             }
         }
 
-        private bool ReferenceExists(ContentReference contentRef)
-        {
-            return _repo.TryGet(contentRef, out IContent cont);
-        }
-
-        private ContentType FindEpiserverContentType(object contentTypeString)
-        {
-            var contentType = _typerepo.Load((string)contentTypeString);
-
-            if(contentType!=null)
-            {
-                return contentType;
-            }
-
-            if(int.TryParse((string)contentTypeString, out int contentTypeId)) {
-                return _typerepo.Load(contentTypeId);
-            }
-            
-            return null;
-        }
-
         [AuthorizePermission("EPiServerServiceApi", "WriteAccess"), HttpDelete, Route("entity/{*path}")]
         public virtual IHttpActionResult DeleteContent(string path)
         {
@@ -480,6 +494,33 @@ namespace ServiceAPIExtensions.Controllers
             if (contentReference == ContentReference.RootPage)
             {
                 return BadRequestErrorCode("DELETE_ROOT_NOT_ALLOWED");
+            }
+
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!String.IsNullOrEmpty(language))
+            {
+                if (!_repo.TryGet(contentReference, cultureInfo, out IContent _))
+                {
+                    return NotFound();
+                }
+
+                if (string.Equals(cultureInfo.TwoLetterISOLanguageName, ContentLanguage.PreferredCulture.TwoLetterISOLanguageName))
+                {
+                    return BadRequestMasterLanguage(language);
+                }
+
+                try
+                {
+                    _repo.DeleteLanguageBranch(contentReference, cultureInfo.TwoLetterISOLanguageName, EPiServer.Security.AccessLevel.Delete);
+                    return Ok();
+                } catch (AccessDeniedException)
+                {
+                    return StatusCode(HttpStatusCode.Forbidden);
+                }
             }
 
             try
@@ -503,12 +544,18 @@ namespace ServiceAPIExtensions.Controllers
             path = path ?? "";
             var contentRef = FindContentReference(path);
             if (contentRef == ContentReference.EmptyReference) return NotFound();
-                
-            if(!_repo.TryGet(contentRef, out IContent content)) {
+
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentRef, cultureInfo, out IContent content))
+            {
                 return NotFound();
             }
 
-            if(!HasAccess(content, EPiServer.Security.AccessLevel.Read))
+            if (!HasAccess(content, EPiServer.Security.AccessLevel.Read))
             {
                 return StatusCode(HttpStatusCode.Forbidden);
             }
@@ -543,8 +590,6 @@ namespace ServiceAPIExtensions.Controllers
 
             return StatusCode(HttpStatusCode.NoContent);
         }
-
-        const int GetChildrenRecurseContentLevel = 1;
         
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
@@ -553,11 +598,17 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
 
-            if (!_repo.TryGet(contentReference, out IContent parentContent)) {
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+            
+            if (!_repo.TryGet(contentReference, cultureInfo, out IContent parentContent))
+            {
                 return NotFound();
             }
 
-            if(!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
+            if (!HasAccess(parentContent,EPiServer.Security.AccessLevel.Read))
             {
                 return StatusCode(HttpStatusCode.Forbidden);
             }
@@ -568,7 +619,7 @@ namespace ServiceAPIExtensions.Controllers
             // Collect sub pages
             children.AddRange(
                 _repo
-                .GetChildren<IContent>(contentReference)
+                .GetChildren<IContent>(contentReference, cultureInfo)
                 .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
                 .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel, typerepo: typerepo)));
 
@@ -594,7 +645,12 @@ namespace ServiceAPIExtensions.Controllers
             var contentReference = FindContentReference(path);
             if (contentReference == ContentReference.EmptyReference) return NotFound();
             
-            if(!_repo.TryGet(contentReference, out IContent content))
+            if (!TryGetCultureInfo(out string language, out CultureInfo cultureInfo))
+            {
+                return BadRequestInvalidLanguage(language);
+            }
+
+            if (!_repo.TryGet(contentReference, cultureInfo, out IContent content))
             {
                 return NotFound();
             }
@@ -773,7 +829,146 @@ namespace ServiceAPIExtensions.Controllers
             return sBuilder.ToString();
         }
 
+        private bool TryGetCultureInfo(out string language, out CultureInfo cultureInfo)
+        {
+            var query = Request.GetQueryNameValuePairs().Where(kv => kv.Key == "language").FirstOrDefault();
 
+            language = query.Value;
+
+            if (!String.IsNullOrEmpty(language))
+            {
+                try
+                {
+                    var culture = CultureInfo
+                    .GetCultures(CultureTypes.AllCultures)
+                    .Where(ci => String.Equals(ci.Name, query.Value)) // Cannot use out parameters inside of a lambda.. therefore query was used again
+                    .First();
+                    
+                    // Episerver onlu support the two-letter cultures. So e.g. en-US should be en.
+                    cultureInfo = culture.TwoLetterISOLanguageName != null ? 
+                        CultureInfo.GetCultureInfo(culture.TwoLetterISOLanguageName) :
+                        culture;
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    cultureInfo = null;
+                    return false;
+                }
+            }
+
+            cultureInfo = ContentLanguage.PreferredCulture;
+            return true;
+        }
+
+        private static IEnumerable<CultureInfo> GetLanguages()
+        {
+            return DataFactory.Instance.GetPage(PageReference.StartPage).ExistingLanguages;
+        }
+
+        private static IEnumerable<CultureInfo> GetLanguages(IContent content)
+        {
+            PageData pagedata = content as PageData;
+            if (pagedata != null)
+            {
+                return pagedata.ExistingLanguages;
+            }
+
+            BlockData blockdata = content as BlockData;
+            if (blockdata != null)
+            {
+                return GetLanguages().Where(c => DataFactory.Instance.Get<IContent>(content.ContentLink, c) != null);
+            }
+
+            // Files and media do not have languages
+            return null;
+        }
+
+        private static string GetLanguage(IContent content)
+        {
+            PageData pagedata = content as PageData;
+            if (pagedata != null)
+            {
+                return pagedata.Language.Name;
+            }
+
+            BlockData blockdata = content as BlockData;
+            if (blockdata != null)
+            {
+                foreach (CultureInfo ci in GetLanguages())
+                {
+                    var check = DataFactory.Instance.Get<IContent>(content.ContentLink, ci);
+                    if (check == content)
+                        return ci.TwoLetterISOLanguageName;
+                }
+            }
+            
+            // Files and media do not have languages
+            return "";
+        }
+
+        IHttpActionResult BadRequestErrorCode(string errorCode)
+        {
+            return Content(HttpStatusCode.BadRequest, new { errorCode });
+        }
+
+        IHttpActionResult BadRequestValidationErrors(params ValidationError[] errors)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "FIELD_VALIDATION_ERROR",
+                validationErrors = errors.GroupBy(x => x.name).ToDictionary(x => x.Key, x => x.ToList())
+            });
+        }
+
+        IHttpActionResult BadRequestInvalidLanguage(string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "INVALID_LANGUAGE_ERROR",
+                errorMessage = $"Invalid language given: '{language}'"
+            });
+        }
+
+        IHttpActionResult BadRequestMasterLanguage(string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "MASTER_LANGUAGE_ERROR",
+                errorMessage = $"Cannot delete language branch '{language}' since it is the master language for this content."
+            });
+        }
+
+        IHttpActionResult BadRequestLanguageBranchExists(IContent content, string language)
+        {
+            return Content(HttpStatusCode.BadRequest, new
+            {
+                errorCode = "LANGUAGE_BRANCH_ALREADY_EXISTS",
+                errorMessage = $"Given language '{language}' already exists for content of ID '{content.ContentLink}'"
+            });
+        }
+
+        private bool ReferenceExists(ContentReference contentRef)
+        {
+            return _repo.TryGet(contentRef, out IContent cont);
+        }
+
+        private ContentType FindEpiserverContentType(object contentTypeString)
+        {
+            var contentType = _typerepo.Load((string)contentTypeString);
+
+            if (contentType != null)
+            {
+                return contentType;
+            }
+
+            if (int.TryParse((string)contentTypeString, out int contentTypeId))
+            {
+                return _typerepo.Load(contentTypeId);
+            }
+
+            return null;
+        }
 
         class ValidationError
         {
