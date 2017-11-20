@@ -167,7 +167,7 @@ namespace ServiceAPIExtensions.Controllers
                     var propertyContentArea = pi as EPiServer.SpecializedProperties.PropertyContentArea;
                     ContentArea contentArea = propertyContentArea.Value as ContentArea;
 
-                    result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent().ContentLink.ID).ToList());
+                    result.Add(pi.Name, contentArea.Items.Select(i => i.GetContent()?.ContentLink?.ID).ToList());
                 }
                 else if (pi.Value is Int32 || pi.Value is Boolean || pi.Value is DateTime || pi.Value is Double || pi.Value is string[] || pi.Value is string)
                 {
