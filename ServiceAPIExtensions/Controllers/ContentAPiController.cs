@@ -707,6 +707,20 @@ namespace ServiceAPIExtensions.Controllers
             return EpiserverContentTypeResult(page);
         }
 
+        [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("lang/")]
+        public virtual IHttpActionResult GetAllLanguages()
+        {
+            ILanguageBranchRepository languageRepo = ServiceLocator.Current.GetInstance<ILanguageBranchRepository>();
+
+            if (languageRepo == null) return BadRequest("LanguageRepo not found");
+
+            return Ok(new
+            {
+                enabled = languageRepo.ListEnabled().Select(x => x.Culture.ToString()).OrderBy(x => x),
+                available = languageRepo.ListAll().Select(x => x.Culture.ToString()).Where(x => !string.IsNullOrEmpty(x)).OrderBy(x => x)
+            });
+
+        }
 
         bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
         {
