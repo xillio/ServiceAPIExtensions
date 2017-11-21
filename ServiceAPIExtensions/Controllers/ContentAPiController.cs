@@ -65,7 +65,7 @@ namespace ServiceAPIExtensions.Controllers
                 "ContentTypeID",
                 "ContentLink",
                 "__EpiserverAvailableLanguages",
-                "__EpiserverDefaultLanguage",
+                "__EpiserverMasterLanguage",
                 "PageLanguageBranch",
                 "PageMasterLanguageBranch"
 
