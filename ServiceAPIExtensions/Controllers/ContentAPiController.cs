@@ -63,7 +63,12 @@ namespace ServiceAPIExtensions.Controllers
                 "PageParentLink",
                 "PageGUID",
                 "ContentTypeID",
-                "ContentLink"
+                "ContentLink",
+                "__EpiserverAvailableLanguages",
+                "__EpiserverDefaultLanguage",
+                "PageLanguageBranch",
+                "PageMasterLanguageBranch"
+
             });
 
         /// <summary>
@@ -106,7 +111,7 @@ namespace ServiceAPIExtensions.Controllers
             result["__EpiserverContentType"] = GetContentType(content, typerepo );
             result["__EpiserverBaseContentType"] = GetBaseContentType(content);
             result["__EpiserverAvailableLanguages"] = GetLanguages(content);
-            result["__EpiserverDefaultLanguage"] = ContentLanguage.PreferredCulture;
+            result["__EpiserverMasterLanguage"] = GetLanguage(DataFactory.Instance.Get<IContent>(content.ContentLink));
             result["__EpiserverCurrentLanguage"] = GetLanguage(content);
 
             var binaryContent = content as IBinaryStorable;
@@ -447,11 +452,11 @@ namespace ServiceAPIExtensions.Controllers
 
                 
                 content = _repo.CreateLanguageBranch<IContent>(parentContentRef, cultureInfo);
-                contentProperties.Remove("__EpiserverCurrentLanguage");
             } else
             {
                 content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
             }
+            contentProperties.Remove("__EpiserverCurrentLanguage");
 
             content.Name = (string)nameValue;
 
@@ -649,10 +654,21 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestInvalidLanguage(language);
             }
-
-            if (!_repo.TryGet(contentReference, cultureInfo, out IContent content))
+            
+            IContent content;
+            if (cultureInfo != null)
             {
-                return NotFound();
+                if (!_repo.TryGet(contentReference, cultureInfo, out content))
+                {
+                    return NotFound();
+                }
+            }
+            else
+            {
+                if (!_repo.TryGet(contentReference, out content))
+                {
+                    return NotFound();
+                }
             }
 
             if (content.IsDeleted)
@@ -666,18 +682,6 @@ namespace ServiceAPIExtensions.Controllers
             }
             
             return Ok(MapContent(content, recurseContentLevelsRemaining: 1, typerepo: _typerepo.List().ToDictionary(x => x.ID)));
-        }
-
-        bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
-        {
-            var securable = content as EPiServer.Security.ISecurable;
-
-            if(securable==null)
-            {
-                return true;
-            }
-
-            return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
         }
 
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("type/{type}")]
@@ -701,6 +705,19 @@ namespace ServiceAPIExtensions.Controllers
             var page = _repo.GetDefault<IContent>(ContentReference.RootPage, episerverType.ID);
 
             return EpiserverContentTypeResult(page);
+        }
+
+
+        bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
+        {
+            var securable = content as EPiServer.Security.ISecurable;
+
+            if (securable == null)
+            {
+                return true;
+            }
+
+            return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
         }
 
         private IHttpActionResult EpiserverContentTypeResult(IContent content)
@@ -828,7 +845,7 @@ namespace ServiceAPIExtensions.Controllers
 
             return sBuilder.ToString();
         }
-
+        
         private bool TryGetCultureInfo(out string language, out CultureInfo cultureInfo)
         {
             var query = Request.GetQueryNameValuePairs().Where(kv => kv.Key == "language").FirstOrDefault();
@@ -837,33 +854,20 @@ namespace ServiceAPIExtensions.Controllers
 
             if (!String.IsNullOrEmpty(language))
             {
-                try
-                {
-                    var culture = CultureInfo
-                    .GetCultures(CultureTypes.AllCultures)
-                    .Where(ci => String.Equals(ci.Name, query.Value)) // Cannot use out parameters inside of a lambda.. therefore query was used again
-                    .First();
-                    
-                    // Episerver onlu support the two-letter cultures. So e.g. en-US should be en.
-                    cultureInfo = culture.TwoLetterISOLanguageName != null ? 
-                        CultureInfo.GetCultureInfo(culture.TwoLetterISOLanguageName) :
-                        culture;
-                    return true;
-                }
-                catch (InvalidOperationException)
-                {
-                    cultureInfo = null;
-                    return false;
-                }
+                ILanguageBranchRepository languageRepo = ServiceLocator.Current.GetInstance<ILanguageBranchRepository>();
+
+                cultureInfo = languageRepo.Load(language)?.Culture;
+                return (cultureInfo != null);
             }
 
-            cultureInfo = ContentLanguage.PreferredCulture;
+            cultureInfo = null; // ContentLanguage.PreferredCulture;
             return true;
         }
 
         private static IEnumerable<CultureInfo> GetLanguages()
         {
-            return DataFactory.Instance.GetPage(PageReference.StartPage).ExistingLanguages;
+            ILanguageBranchRepository languageRepo = ServiceLocator.Current.GetInstance<ILanguageBranchRepository>();
+            return languageRepo.ListEnabled().Select(lb => lb.Culture);
         }
 
         private static IEnumerable<CultureInfo> GetLanguages(IContent content)
