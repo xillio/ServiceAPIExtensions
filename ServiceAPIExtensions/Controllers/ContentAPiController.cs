@@ -50,7 +50,9 @@ namespace ServiceAPIExtensions.Controllers
         //If one of these properties is altered no error is thrown.
         readonly static List<String> NonUpdatingProperties = new List<string>(
             new String[] {
-                "PageCategory"
+                "PageCategory",
+                "__EpiserverContentType",
+                "__EpiserverCurrentLanguage"
             });
 
         //These properties will be removed from any alteration call as they cannot be changed.
@@ -67,7 +69,8 @@ namespace ServiceAPIExtensions.Controllers
                 "__EpiserverAvailableLanguages",
                 "__EpiserverMasterLanguage",
                 "PageLanguageBranch",
-                "PageMasterLanguageBranch"
+                "PageMasterLanguageBranch",
+                "SiteLogotype"
 
             });
 
@@ -248,6 +251,12 @@ namespace ServiceAPIExtensions.Controllers
             }
 
             foreach (String property in NonCreatingProperties)
+            {
+                if (newProperties.ContainsKey(property))
+                    newProperties.Remove(property);
+            }
+
+            foreach (String property in NonUpdatingProperties)
             {
                 if (newProperties.ContainsKey(property))
                     newProperties.Remove(property);
