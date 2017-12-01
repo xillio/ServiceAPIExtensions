@@ -387,8 +387,12 @@ namespace ServiceAPIExtensions.Controllers
             {
                 return BadRequestValidationErrors(ValidationError.Required("ContentType"));
             }
-            contentProperties.Remove("ContentType");
-            contentProperties.Remove("__EpiserverContentType");
+
+            if (contentProperties.ContainsKey("ContentType"))
+                contentProperties.Remove("ContentType");
+
+            if (contentProperties.ContainsKey("__EpiserverContentType"))
+                contentProperties.Remove("__EpiserverContentType");
 
             if (!(contentTypeString is string))
             {
@@ -431,12 +435,13 @@ namespace ServiceAPIExtensions.Controllers
                 }
 
                 CultureInfo cultureInfo = null;
-                try
+                if(!TryGetCultureInfo((string)languageValue, out cultureInfo))
                 {
-                    cultureInfo = CultureInfo.GetCultureInfo((string)languageValue);
-                } catch (Exception)
-                {
-                    return BadRequestInvalidLanguage(languageValue.ToString());
+                    if (cultureInfo == null || !GetLanguages().Any(ci => ci.TwoLetterISOLanguageName == cultureInfo.TwoLetterISOLanguageName))
+                    {
+                        return BadRequestInvalidLanguage(languageValue.ToString());
+                    }
+                    cultureInfo = new CultureInfo(cultureInfo.TwoLetterISOLanguageName);
                 }
 
                 if (!GetLanguages().Any(ci => ci.TwoLetterISOLanguageName == cultureInfo.TwoLetterISOLanguageName))
@@ -445,18 +450,19 @@ namespace ServiceAPIExtensions.Controllers
                 }
                 cultureInfo = new CultureInfo(cultureInfo.TwoLetterISOLanguageName);
 
+                
                 if (_repo.TryGet<IContent>(parentContentRef, cultureInfo, out IContent parent))
                 {
                     return BadRequestLanguageBranchExists(parent, cultureInfo.TwoLetterISOLanguageName);
                 }
 
-                
                 content = _repo.CreateLanguageBranch<IContent>(parentContentRef, cultureInfo);
             } else
             {
                 content = _repo.GetDefault<IContent>(parentContentRef, contentType.ID);
             }
-            contentProperties.Remove("__EpiserverCurrentLanguage");
+            if (contentProperties.ContainsKey("__EpiserverCurrentLanguage"))
+                contentProperties.Remove("__EpiserverCurrentLanguage");
 
             content.Name = (string)nameValue;
 
@@ -478,7 +484,7 @@ namespace ServiceAPIExtensions.Controllers
             try
             {
                 var createdReference = _repo.Save(content, saveaction);
-                return Created(path, new { reference = createdReference.ID });
+                return Created(path, new { reference = createdReference.ID , __EpiserverCurrentLanguage = GetLanguage(content)});
             }
             catch(AccessDeniedException)
             {
@@ -876,6 +882,24 @@ namespace ServiceAPIExtensions.Controllers
 
             cultureInfo = null; // ContentLanguage.PreferredCulture;
             return true;
+        }
+
+        private bool TryGetCultureInfo(string language, out CultureInfo cultureInfo)
+        {
+            ILanguageBranchRepository languageRepo = ServiceLocator.Current.GetInstance<ILanguageBranchRepository>();
+
+            cultureInfo = languageRepo.Load(language)?.Culture;
+            if (cultureInfo != null)
+                return true;
+            try
+            {
+                cultureInfo = CultureInfo.GetCultureInfo(language);
+            }
+            catch(Exception)
+            {
+
+            }
+            return false;
         }
 
         private static IEnumerable<CultureInfo> GetLanguages()
