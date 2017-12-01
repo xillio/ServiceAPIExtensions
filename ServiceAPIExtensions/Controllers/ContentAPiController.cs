@@ -512,6 +512,11 @@ namespace ServiceAPIExtensions.Controllers
                 return BadRequestInvalidLanguage(language);
             }
 
+            if (!HasAccess(contentReference, EPiServer.Security.AccessLevel.Delete))
+            {
+                return StatusCode(HttpStatusCode.Forbidden);
+            }
+
             if (!String.IsNullOrEmpty(language))
             {
                 if (!_repo.TryGet(contentReference, cultureInfo, out IContent _))
@@ -731,6 +736,18 @@ namespace ServiceAPIExtensions.Controllers
         bool HasAccess(IContent content, EPiServer.Security.AccessLevel accessLevel)
         {
             var securable = content as EPiServer.Security.ISecurable;
+
+            if (securable == null)
+            {
+                return true;
+            }
+
+            return securable.GetSecurityDescriptor().HasAccess(User, accessLevel);
+        }
+
+        bool HasAccess(ContentReference reference, EPiServer.Security.AccessLevel accessLevel)
+        {
+            var securable = reference as EPiServer.Security.ISecurable;
 
             if (securable == null)
             {
