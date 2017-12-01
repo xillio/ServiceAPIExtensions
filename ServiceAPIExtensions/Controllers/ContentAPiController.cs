@@ -426,6 +426,7 @@ namespace ServiceAPIExtensions.Controllers
             // Create content.
             IContent content;
 
+            CultureInfo cultureInfo = null;
             // Check if a Language tag is set.
             if (contentProperties.TryGetValue("__EpiserverCurrentLanguage", out object languageValue))
             {
@@ -433,8 +434,7 @@ namespace ServiceAPIExtensions.Controllers
                 {
                     return BadRequestValidationErrors(ValidationError.InvalidType("__EpiserverCurrentLanguage", typeof(string)));
                 }
-
-                CultureInfo cultureInfo = null;
+                
                 if(!TryGetCultureInfo((string)languageValue, out cultureInfo))
                 {
                     if (cultureInfo == null || !GetLanguages().Any(ci => ci.TwoLetterISOLanguageName == cultureInfo.TwoLetterISOLanguageName))
@@ -484,7 +484,7 @@ namespace ServiceAPIExtensions.Controllers
             try
             {
                 var createdReference = _repo.Save(content, saveaction);
-                return Created(path, new { reference = createdReference.ID , __EpiserverCurrentLanguage = GetLanguage(content)});
+                return Created(path, new { reference = createdReference.ID , __EpiserverCurrentLanguage = cultureInfo});
             }
             catch(AccessDeniedException)
             {
