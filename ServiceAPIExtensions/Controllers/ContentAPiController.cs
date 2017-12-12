@@ -5,23 +5,18 @@ using EPiServer.DataAbstraction;
 using EPiServer.ServiceLocation;
 using System;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Web;
 using System.Web.Http;
 using System.Web.Http.Results;
 using EPiServer.ServiceApi.Configuration;
 using EPiServer.Framework.Blobs;
 using System.IO;
 using EPiServer.Data.Entity;
-using EPiServer.Web.Internal;
 using Newtonsoft.Json;
 using System.Text;
 using System.Security.Cryptography;
-using System.ComponentModel.DataAnnotations;
-using EPiServer.Validation;
 using System.Globalization;
 using EPiServer.Globalization;
 
@@ -615,7 +610,14 @@ namespace ServiceAPIExtensions.Controllers
 
             return StatusCode(HttpStatusCode.NoContent);
         }
-        
+
+        [HttpGet, Route("ping")]
+        public virtual IHttpActionResult Ping()
+        {
+            return Ok();
+        }
+
+
         [AuthorizePermission("EPiServerServiceApi", "ReadAccess"), HttpGet, Route("children/{*path}")]
         public virtual IHttpActionResult GetChildren(string path)
         {
