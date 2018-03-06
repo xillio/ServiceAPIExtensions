@@ -648,6 +648,7 @@ namespace ServiceAPIExtensions.Controllers
                 _repo
                 .GetChildren<IContent>(contentReference, cultureInfo)
                 .Where(c=>HasAccess(c, EPiServer.Security.AccessLevel.Read))
+                .Where(c=>!c.IsDeleted)
                 .Select(x => MapContent(x, recurseContentLevelsRemaining: GetChildrenRecurseContentLevel, typerepo: typerepo)));
 
             if (parentContent is PageData)
